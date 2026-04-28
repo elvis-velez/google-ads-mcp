@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# uv
+.uv/
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Secrets — never commit
+.env
+.env.*
+credentials.yaml
+credentials.json
+google-ads.yaml
+*.pem
+*.key
+
+# AI assistant artifacts
+.claude/
+.codex/
+.mcp.json
+
+# Audit logs (local)
+audit.log
+*.log
