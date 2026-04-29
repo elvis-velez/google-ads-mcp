@@ -175,7 +175,7 @@ Settings load with this precedence: env vars (prefixed `GOOGLE_ADS_MCP_`) > comp
 git clone <this-repo>
 cd google-ads-mcp
 uv sync --group dev
-uv run pytest             # 65 unit tests
+uv run pytest             # 100 unit tests
 uv run ruff check .
 uv run pyright src tests  # strict mode
 ```
