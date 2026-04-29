@@ -2,15 +2,13 @@
 """Generic mutate via `GoogleAdsService`.
 
 Cross-service atomic call: all operations in one batch succeed or all fail
-(unless we eventually expose `partial_failure`, deferred). v1 supports
-`campaign` create/update/remove; other services raise `NotImplementedError`
-that points operators at the appropriate Layer-1 outcome tool.
-
-Building a `MutateOperation` proto requires fiddly proto-plus assignment;
-keeping it scoped to one service in v1 lets us prove the safety machinery
-without expanding here. Phase 3 outcome tools will pull in additional
-service translators as they need them — one helper per service, same
-shape as `_build_campaign_op`.
+(`partial_failure` deferred). The translator works by convention against
+the `MutateOperation` oneof: every Google Ads service exposes a
+`{service}_operation` field whose value has the standard
+`create | update | remove` oneof plus an `update_mask` for updates. Adding
+support for a new service is "make sure the service name is correct" —
+no per-service translator code needed unless that service breaks the
+convention.
 """
 
 from __future__ import annotations
@@ -56,45 +54,51 @@ def mutate(
 
 
 def _build_mutate_operation(client: GoogleAdsClient, op: Operation) -> Any:
-    if op.service == "campaign":
-        return _build_campaign_op(client, op)
-    raise NotImplementedError(
-        f"Layer-2 mutate doesn't yet support service '{op.service}'. "
-        "Use a Layer-1 outcome tool if available, or extend ads/mutate.py "
-        "with a per-service translator following the campaign pattern."
-    )
+    """Translate an internal Operation to a MutateOperation proto.
 
-
-def _build_campaign_op(client: GoogleAdsClient, op: Operation) -> Any:
+    Works against any service whose `{service}_operation` field follows the
+    standard create/update/remove + update_mask shape — the overwhelming
+    majority of Google Ads services. If a service breaks the convention
+    (none currently in v1's working set), add a special case here.
+    """
     mutate_op: Any = client.get_type("MutateOperation")
-    campaign_op = mutate_op.campaign_operation
+
+    field_name = f"{op.service}_operation"
+    service_op = getattr(mutate_op, field_name, None)
+    if service_op is None:
+        raise ValidationFailed(
+            f"Unknown Google Ads service '{op.service}'. The MutateOperation "
+            f"proto has no '{field_name}' field. Use the gads-schema:// "
+            "resource to discover valid service names."
+        )
 
     if op.op == "remove":
         rn = op.resource.get("resource_name")
         if not rn:
             raise ValidationFailed(
-                "Remove operation requires 'resource_name' in resource."
+                f"Remove operation on '{op.service}' requires 'resource_name'."
             )
-        campaign_op.remove = rn
+        service_op.remove = rn
         return mutate_op
 
-    target = campaign_op.create if op.op == "create" else campaign_op.update
+    target = service_op.create if op.op == "create" else service_op.update
 
     for k, v in op.resource.items():
         try:
             setattr(target, k, v)
         except (AttributeError, TypeError, ValueError) as e:
             raise ValidationFailed(
-                f"Cannot set campaign.{k}={v!r}: {e}"
+                f"Cannot set {op.service}.{k}={v!r}: {e}"
             ) from e
 
     if op.op == "update":
         if not op.update_mask:
             raise ValidationFailed(
-                "Update operation requires update_mask listing the fields being changed."
+                f"Update operation on '{op.service}' requires update_mask "
+                "listing the fields being changed."
             )
         for path in op.update_mask:
-            campaign_op.update_mask.paths.append(path)
+            service_op.update_mask.paths.append(path)
 
     return mutate_op
 

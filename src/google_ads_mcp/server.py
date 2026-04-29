@@ -27,6 +27,7 @@ from google_ads_mcp.safety.clock import Clock, SystemClock
 from google_ads_mcp.safety.limits import Limits, LimitsConfig, load_limits
 from google_ads_mcp.safety.pending import PendingStore
 from google_ads_mcp.settings import Settings
+from google_ads_mcp.tools.layer1 import register_layer1
 from google_ads_mcp.tools.layer2 import register_layer2
 
 
@@ -93,6 +94,14 @@ def build_server(
         settings=settings,
         pending=pending,
         audit=audit,
+        allowlist=allowlist,
+        limits=limits,
+    )
+    register_layer1(
+        mcp,
+        client=client,
+        settings=settings,
+        pending=pending,
         allowlist=allowlist,
         limits=limits,
     )

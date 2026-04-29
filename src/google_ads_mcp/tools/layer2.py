@@ -19,12 +19,13 @@ from pydantic import Field
 
 from google_ads_mcp.ads import gaql as gaql_impl
 from google_ads_mcp.ads import mutate as mutate_impl
-from google_ads_mcp.safety import diff, guardrails
+from google_ads_mcp.safety import guardrails
 from google_ads_mcp.safety.allowlist import CustomerAllowlist
 from google_ads_mcp.safety.audit import AuditLogger
 from google_ads_mcp.safety.limits import LimitsConfig
 from google_ads_mcp.safety.pending import PendingStore
 from google_ads_mcp.settings import Settings
+from google_ads_mcp.tools._flow import perform_mutate
 from google_ads_mcp.types import ApplyResult, GaqlResult, MutatePreview, Operation
 
 
@@ -124,34 +125,16 @@ def register_layer2(
         `apply(mutate_id)` to commit.
         """
 
-        def go() -> MutatePreview:
-            guardrails.check_customer_allowlist(customer_id, allowlist=allowlist)
-            guardrails.check_batch_size(
-                operations, max_size=settings.mutate_max_ops_per_call
-            )
-            account_limits = limits.for_customer(customer_id)
-            for op in operations:
-                guardrails.check_cpc(op, max_micros=account_limits.cpc_max_micros)
-                guardrails.check_budget(
-                    op, max_micros=account_limits.budget_max_daily_micros
-                )
-
-            mutate_impl.mutate(client, customer_id, operations, validate_only=True)
-
-            diffs = [diff.render(op) for op in operations]
-            mutate_id, expires_at = pending.store(
-                customer_id=customer_id, operations=operations
-            )
-
-            return MutatePreview(
-                mutate_id=mutate_id,
-                customer_id=customer_id,
-                operations_count=len(operations),
-                diffs=diffs,
-                expires_at_iso=expires_at.isoformat(),
-            )
-
-        return await asyncio.to_thread(go)
+        return await asyncio.to_thread(
+            perform_mutate,
+            client=client,
+            customer_id=customer_id,
+            operations=operations,
+            settings=settings,
+            allowlist=allowlist,
+            limits=limits,
+            pending=pending,
+        )
 
     @mcp.tool(
         annotations=ToolAnnotations(
