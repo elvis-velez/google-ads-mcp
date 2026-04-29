@@ -39,6 +39,10 @@ def _default_audit_log_path() -> Path:
     return _xdg_data_home() / "google-ads-mcp" / "audit.log"
 
 
+def _default_limits_path() -> Path:
+    return _xdg_config_home() / "google-ads-mcp" / "limits.yaml"
+
+
 class Settings(BaseSettings):
     """Top-level server settings.
 
@@ -50,6 +54,7 @@ class Settings(BaseSettings):
 
     credentials_path: Path = Field(default_factory=_default_credentials_path)
     audit_log_path: Path = Field(default_factory=_default_audit_log_path)
+    limits_path: Path = Field(default_factory=_default_limits_path)
 
     # Hard caps on what a single GAQL call can return to the LLM. The byte
     # cap protects context window; the row cap protects against pathological

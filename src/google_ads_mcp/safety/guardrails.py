@@ -9,6 +9,7 @@ checks plug in by adding a function plus a single call.
 from __future__ import annotations
 
 from google_ads_mcp.errors import GuardrailViolation
+from google_ads_mcp.safety.allowlist import CustomerAllowlist
 from google_ads_mcp.types import Operation
 
 _USD_PER_MICRO = 1_000_000
@@ -16,6 +17,21 @@ _USD_PER_MICRO = 1_000_000
 
 def _micros_to_usd(micros: int) -> str:
     return f"${micros / _USD_PER_MICRO:,.2f}"
+
+
+def check_customer_allowlist(customer_id: str, *, allowlist: CustomerAllowlist) -> None:
+    """Reject operations on customer_ids the install can't access.
+
+    Confused-deputy mitigation: the LLM might construct a customer_id from
+    user input or hallucinate one. Verify against the credentials' actual
+    accessible-customers set before crossing the SDK boundary. Not
+    overridable.
+    """
+    if not allowlist.is_allowed(customer_id):
+        raise GuardrailViolation(
+            f"customer_id '{customer_id}' is not accessible by these credentials. "
+            "Use the gads-account://accessible resource to list valid IDs."
+        )
 
 
 def check_batch_size(operations: list[Operation], *, max_size: int) -> None:

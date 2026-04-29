@@ -15,13 +15,16 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
+from google_ads_mcp.ads import accounts as accounts_impl
 from google_ads_mcp.ads.client import build_client
 from google_ads_mcp.auth.credentials import CredentialsProvider
 from google_ads_mcp.auth.local import LocalRefreshTokenCredentials
 from google_ads_mcp.resources.accounts import register_accounts
 from google_ads_mcp.resources.schema import register_schema
+from google_ads_mcp.safety.allowlist import CustomerAllowlist
 from google_ads_mcp.safety.audit import AuditLogger, JsonlAuditLogger
 from google_ads_mcp.safety.clock import Clock, SystemClock
+from google_ads_mcp.safety.limits import Limits, LimitsConfig, load_limits
 from google_ads_mcp.safety.pending import PendingStore
 from google_ads_mcp.settings import Settings
 from google_ads_mcp.tools.layer2 import register_layer2
@@ -35,14 +38,15 @@ def build_server(
     clock: Clock | None = None,
     audit: AuditLogger | None = None,
     pending: PendingStore | None = None,
+    allowlist: CustomerAllowlist | None = None,
+    limits: LimitsConfig | None = None,
 ) -> FastMCP:
     """Construct and configure the MCP server.
 
-    Inject `settings`, `credentials_provider`, `client`, `clock`, `audit`, or
-    `pending` for tests. When `client` is given, credential loading is skipped
-    entirely — that's how unit tests build a server without touching
-    credentials.yaml. The other defaults are wired here so production gets a
-    consistent set of cooperating components.
+    Inject any dependency for tests. When `client` is given, credential
+    loading is skipped — that's how unit tests build a server without
+    touching credentials.yaml. Production wires all defaults here so the
+    cooperating components share a single Settings + Clock + AuditLogger.
     """
     settings = settings or Settings()
     clock = clock or SystemClock()
@@ -56,6 +60,17 @@ def build_server(
     pending = pending or PendingStore(
         clock=clock,
         ttl=timedelta(seconds=settings.mutate_id_ttl_seconds),
+    )
+    bound_client = client  # capture for the closure (lambda below)
+    allowlist = allowlist or CustomerAllowlist(
+        fetch=lambda: accounts_impl.list_accessible(bound_client),
+    )
+    limits = limits or load_limits(
+        settings.limits_path,
+        baseline=Limits(
+            cpc_max_micros=settings.cpc_max_micros,
+            budget_max_daily_micros=settings.budget_max_daily_micros,
+        ),
     )
 
     mcp = FastMCP("google-ads-mcp")
@@ -72,8 +87,16 @@ def build_server(
         """Returns 'pong'. Smoke test that the server is reachable."""
         return "pong"
 
-    register_layer2(mcp, client=client, settings=settings, pending=pending, audit=audit)
-    register_accounts(mcp, client=client)
+    register_layer2(
+        mcp,
+        client=client,
+        settings=settings,
+        pending=pending,
+        audit=audit,
+        allowlist=allowlist,
+        limits=limits,
+    )
+    register_accounts(mcp, allowlist=allowlist)
     register_schema(mcp, client=client)
 
     return mcp

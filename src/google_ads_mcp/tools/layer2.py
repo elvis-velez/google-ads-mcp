@@ -20,7 +20,9 @@ from pydantic import Field
 from google_ads_mcp.ads import gaql as gaql_impl
 from google_ads_mcp.ads import mutate as mutate_impl
 from google_ads_mcp.safety import diff, guardrails
+from google_ads_mcp.safety.allowlist import CustomerAllowlist
 from google_ads_mcp.safety.audit import AuditLogger
+from google_ads_mcp.safety.limits import LimitsConfig
 from google_ads_mcp.safety.pending import PendingStore
 from google_ads_mcp.settings import Settings
 from google_ads_mcp.types import ApplyResult, GaqlResult, MutatePreview, Operation
@@ -33,6 +35,8 @@ def register_layer2(
     settings: Settings,
     pending: PendingStore,
     audit: AuditLogger,
+    allowlist: CustomerAllowlist,
+    limits: LimitsConfig,
 ) -> None:
     """Register Layer 2 tools onto the given FastMCP server."""
 
@@ -71,14 +75,18 @@ def register_layer2(
         Returns rows as flat dicts keyed by the dotted field paths from the
         SELECT clause. Sets `truncated=true` when row or byte caps are hit.
         """
-        return await asyncio.to_thread(
-            gaql_impl.search,
-            client,
-            customer_id,
-            query,
-            max_rows=settings.gaql_max_rows,
-            max_bytes=settings.gaql_max_response_bytes,
-        )
+
+        def go() -> GaqlResult:
+            guardrails.check_customer_allowlist(customer_id, allowlist=allowlist)
+            return gaql_impl.search(
+                client,
+                customer_id,
+                query,
+                max_rows=settings.gaql_max_rows,
+                max_bytes=settings.gaql_max_response_bytes,
+            )
+
+        return await asyncio.to_thread(go)
 
     @mcp.tool(
         annotations=ToolAnnotations(
@@ -110,37 +118,40 @@ def register_layer2(
     ) -> MutatePreview:
         """Validate operations against the API and return a previewable mutate_id.
 
-        Runs server-side guardrails (CPC, budget, batch-size), calls the API
-        with `validate_only=true`, renders a per-operation diff, and stores
-        the operations under a `mutate_id`. Call `apply(mutate_id)` to commit.
+        Runs server-side guardrails (customer-allowlist, batch-size, CPC,
+        budget), calls the API with `validate_only=true`, renders a per-
+        operation diff, and stores the operations under a `mutate_id`. Call
+        `apply(mutate_id)` to commit.
         """
-        # Guardrails are pure-sync; run inline before crossing into the SDK.
-        guardrails.check_batch_size(operations, max_size=settings.mutate_max_ops_per_call)
-        for op in operations:
-            guardrails.check_cpc(op, max_micros=settings.cpc_max_micros)
-            guardrails.check_budget(op, max_micros=settings.budget_max_daily_micros)
 
-        # Validate via SDK; a failure raises ApiError (translated by the boundary).
-        await asyncio.to_thread(
-            mutate_impl.mutate,
-            client,
-            customer_id,
-            operations,
-            validate_only=True,
-        )
+        def go() -> MutatePreview:
+            guardrails.check_customer_allowlist(customer_id, allowlist=allowlist)
+            guardrails.check_batch_size(
+                operations, max_size=settings.mutate_max_ops_per_call
+            )
+            account_limits = limits.for_customer(customer_id)
+            for op in operations:
+                guardrails.check_cpc(op, max_micros=account_limits.cpc_max_micros)
+                guardrails.check_budget(
+                    op, max_micros=account_limits.budget_max_daily_micros
+                )
 
-        diffs = [diff.render(op) for op in operations]
-        mutate_id, expires_at = pending.store(
-            customer_id=customer_id, operations=operations
-        )
+            mutate_impl.mutate(client, customer_id, operations, validate_only=True)
 
-        return MutatePreview(
-            mutate_id=mutate_id,
-            customer_id=customer_id,
-            operations_count=len(operations),
-            diffs=diffs,
-            expires_at_iso=expires_at.isoformat(),
-        )
+            diffs = [diff.render(op) for op in operations]
+            mutate_id, expires_at = pending.store(
+                customer_id=customer_id, operations=operations
+            )
+
+            return MutatePreview(
+                mutate_id=mutate_id,
+                customer_id=customer_id,
+                operations_count=len(operations),
+                diffs=diffs,
+                expires_at_iso=expires_at.isoformat(),
+            )
+
+        return await asyncio.to_thread(go)
 
     @mcp.tool(
         annotations=ToolAnnotations(
