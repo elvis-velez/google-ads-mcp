@@ -20,6 +20,7 @@ from pydantic import Field
 from google_ads_mcp.ads import gaql as gaql_impl
 from google_ads_mcp.ads import mutate as mutate_impl
 from google_ads_mcp.errors import PendingExpired, PendingNotFound
+from google_ads_mcp.observability.activity import ActivityRecorder, with_activity
 from google_ads_mcp.observability.audit import AuditEvent, AuditLogger
 from google_ads_mcp.safety import guardrails
 from google_ads_mcp.safety.allowlist import CustomerAllowlist
@@ -37,6 +38,7 @@ def register_layer2(
     settings: Settings,
     pending: PendingStore,
     audit: AuditLogger,
+    activity: ActivityRecorder,
     allowlist: CustomerAllowlist,
     limits: LimitsConfig,
 ) -> None:
@@ -50,6 +52,7 @@ def register_layer2(
             openWorldHint=True,
         ),
     )
+    @with_activity(activity, name="gaql")
     async def gaql(  # pyright: ignore[reportUnusedFunction]
         customer_id: Annotated[
             str,
@@ -101,6 +104,7 @@ def register_layer2(
             openWorldHint=True,
         ),
     )
+    @with_activity(activity, name="mutate")
     async def mutate(  # pyright: ignore[reportUnusedFunction]
         customer_id: Annotated[
             str,
@@ -147,6 +151,7 @@ def register_layer2(
             openWorldHint=True,
         ),
     )
+    @with_activity(activity, name="apply")
     async def apply(  # pyright: ignore[reportUnusedFunction]
         mutate_id: Annotated[
             str,

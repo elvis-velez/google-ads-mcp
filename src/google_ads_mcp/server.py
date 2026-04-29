@@ -19,6 +19,11 @@ from google_ads_mcp.ads import accounts as accounts_impl
 from google_ads_mcp.ads.client import build_client
 from google_ads_mcp.auth.credentials import CredentialsProvider
 from google_ads_mcp.auth.local import LocalRefreshTokenCredentials
+from google_ads_mcp.observability.activity import (
+    ActivityLogger,
+    ActivityRecorder,
+    JsonlActivityLogger,
+)
 from google_ads_mcp.observability.audit import AuditLogger, JsonlAuditLogger
 from google_ads_mcp.observability.clock import Clock, SystemClock
 from google_ads_mcp.resources.accounts import register_accounts
@@ -38,6 +43,7 @@ def build_server(
     client: Any | None = None,
     clock: Clock | None = None,
     audit: AuditLogger | None = None,
+    activity: ActivityLogger | None = None,
     pending: PendingStore | None = None,
     allowlist: CustomerAllowlist | None = None,
     limits: LimitsConfig | None = None,
@@ -58,6 +64,10 @@ def build_server(
         client = build_client(credentials_provider.get())
 
     audit = audit or JsonlAuditLogger(path=settings.audit_log_path, clock=clock)
+    activity = activity or JsonlActivityLogger(
+        path=settings.activity_log_path, clock=clock
+    )
+    activity_recorder = ActivityRecorder(logger=activity, clock=clock)
     pending = pending or PendingStore(
         clock=clock,
         ttl=timedelta(seconds=settings.mutate_id_ttl_seconds),
@@ -94,6 +104,7 @@ def build_server(
         settings=settings,
         pending=pending,
         audit=audit,
+        activity=activity_recorder,
         allowlist=allowlist,
         limits=limits,
     )
@@ -105,9 +116,10 @@ def build_server(
         allowlist=allowlist,
         limits=limits,
         audit=audit,
+        activity=activity_recorder,
     )
-    register_accounts(mcp, allowlist=allowlist)
-    register_schema(mcp, client=client)
+    register_accounts(mcp, allowlist=allowlist, activity=activity_recorder)
+    register_schema(mcp, client=client, activity=activity_recorder)
 
     return mcp
 

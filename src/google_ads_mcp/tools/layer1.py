@@ -23,6 +23,7 @@ from mcp.types import ToolAnnotations
 from pydantic import Field
 
 from google_ads_mcp.ads import gaql as gaql_impl
+from google_ads_mcp.observability.activity import ActivityRecorder, with_activity
 from google_ads_mcp.observability.audit import AuditLogger
 from google_ads_mcp.safety import guardrails
 from google_ads_mcp.safety.allowlist import CustomerAllowlist
@@ -57,6 +58,7 @@ def register_layer1(
     allowlist: CustomerAllowlist,
     limits: LimitsConfig,
     audit: AuditLogger,
+    activity: ActivityRecorder,
 ) -> None:
     """Register Layer 1 outcome tools."""
 
@@ -83,6 +85,7 @@ def register_layer1(
             openWorldHint=True,
         ),
     )
+    @with_activity(activity, name="pause_campaign")
     async def pause_campaign(  # pyright: ignore[reportUnusedFunction]
         customer_id: Annotated[
             str, Field(description="10-digit Google Ads customer ID, no dashes.")
@@ -116,6 +119,7 @@ def register_layer1(
             openWorldHint=True,
         ),
     )
+    @with_activity(activity, name="enable_campaign")
     async def enable_campaign(  # pyright: ignore[reportUnusedFunction]
         customer_id: Annotated[
             str, Field(description="10-digit Google Ads customer ID, no dashes.")
@@ -144,6 +148,7 @@ def register_layer1(
             openWorldHint=True,
         ),
     )
+    @with_activity(activity, name="set_campaign_budget")
     async def set_campaign_budget(  # pyright: ignore[reportUnusedFunction]
         customer_id: Annotated[str, Field(description="10-digit customer ID.")],
         budget_id: Annotated[
@@ -186,6 +191,7 @@ def register_layer1(
             openWorldHint=True,
         ),
     )
+    @with_activity(activity, name="add_negative_keyword")
     async def add_negative_keyword(  # pyright: ignore[reportUnusedFunction]
         customer_id: Annotated[str, Field(description="10-digit customer ID.")],
         scope: Annotated[
@@ -247,6 +253,7 @@ def register_layer1(
             openWorldHint=True,
         ),
     )
+    @with_activity(activity, name="account_summary")
     async def account_summary(  # pyright: ignore[reportUnusedFunction]
         customer_id: Annotated[str, Field(description="10-digit customer ID.")],
         date_range: Annotated[

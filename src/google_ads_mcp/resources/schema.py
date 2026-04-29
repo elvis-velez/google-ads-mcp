@@ -13,10 +13,16 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 
 from google_ads_mcp.ads import schema as schema_impl
+from google_ads_mcp.observability.activity import ActivityRecorder, with_activity
 from google_ads_mcp.types import ResourceFields
 
 
-def register_schema(mcp: FastMCP, *, client: Any) -> None:
+def register_schema(
+    mcp: FastMCP,
+    *,
+    client: Any,
+    activity: ActivityRecorder,
+) -> None:
     """Register the schema-lookup resource."""
 
     cache: dict[str, ResourceFields] = {}
@@ -30,6 +36,7 @@ def register_schema(mcp: FastMCP, *, client: Any) -> None:
             "resource type (e.g. campaign, ad_group, keyword_view)."
         ),
     )
+    @with_activity(activity, name="gads-schema://", kind="resource")
     async def schema(resource_type: str) -> ResourceFields:  # pyright: ignore[reportUnusedFunction]
         async with lock:
             if resource_type not in cache:

@@ -12,11 +12,17 @@ import asyncio
 
 from mcp.server.fastmcp import FastMCP
 
+from google_ads_mcp.observability.activity import ActivityRecorder, with_activity
 from google_ads_mcp.safety.allowlist import CustomerAllowlist
 from google_ads_mcp.types import AccessibleAccounts
 
 
-def register_accounts(mcp: FastMCP, *, allowlist: CustomerAllowlist) -> None:
+def register_accounts(
+    mcp: FastMCP,
+    *,
+    allowlist: CustomerAllowlist,
+    activity: ActivityRecorder,
+) -> None:
     """Register the accessible-accounts resource."""
 
     @mcp.resource(
@@ -27,6 +33,7 @@ def register_accounts(mcp: FastMCP, *, allowlist: CustomerAllowlist) -> None:
             "10-digit numeric strings, no dashes."
         ),
     )
+    @with_activity(activity, name="gads-account://accessible", kind="resource")
     async def accessible() -> AccessibleAccounts:  # pyright: ignore[reportUnusedFunction]
         ids = await asyncio.to_thread(allowlist.all)
         return AccessibleAccounts(customer_ids=ids)
