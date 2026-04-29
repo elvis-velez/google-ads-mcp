@@ -27,6 +27,13 @@ dependencies = [
 [project.scripts]
 google-ads-mcp = "google_ads_mcp.cli:main"
 
+# Project URLs are intentionally left to be filled in once the GitHub repo is
+# published. Uncomment and fill in before `uv build` + PyPI upload.
+# [project.urls]
+# Homepage = "https://github.com/<org>/google-ads-mcp"
+# Repository = "https://github.com/<org>/google-ads-mcp"
+# Issues = "https://github.com/<org>/google-ads-mcp/issues"
+
 [dependency-groups]
 dev = [
     "pytest>=8.0",
