@@ -23,13 +23,14 @@ from mcp.types import ToolAnnotations
 from pydantic import Field
 
 from google_ads_mcp.ads import gaql as gaql_impl
+from google_ads_mcp.ads import recommendations as recommendations_impl
 from google_ads_mcp.observability.activity import ActivityRecorder, with_activity
-from google_ads_mcp.observability.audit import AuditLogger
+from google_ads_mcp.observability.audit import AuditEvent, AuditLogger
 from google_ads_mcp.safety.allowlist import CustomerAllowlist, check_customer_allowlist
 from google_ads_mcp.safety.pending import PendingStore
 from google_ads_mcp.settings import Settings
 from google_ads_mcp.tools._flow import perform_mutate
-from google_ads_mcp.types import GaqlResult, MutatePreview, Operation
+from google_ads_mcp.types import ApplyResult, GaqlResult, MutatePreview, Operation
 
 _USD_TO_MICROS = 1_000_000
 
@@ -90,8 +91,9 @@ def register_layer1(
     @mcp.tool(
         annotations=ToolAnnotations(
             title="Pause a campaign (preview)",
-            readOnlyHint=True,
+            readOnlyHint=False,
             destructiveHint=False,
+            idempotentHint=False,
             openWorldHint=True,
         ),
     )
@@ -122,8 +124,9 @@ def register_layer1(
     @mcp.tool(
         annotations=ToolAnnotations(
             title="Enable a campaign (preview)",
-            readOnlyHint=True,
+            readOnlyHint=False,
             destructiveHint=False,
+            idempotentHint=False,
             openWorldHint=True,
         ),
     )
@@ -149,8 +152,9 @@ def register_layer1(
     @mcp.tool(
         annotations=ToolAnnotations(
             title="Pause an ad group (preview)",
-            readOnlyHint=True,
+            readOnlyHint=False,
             destructiveHint=False,
+            idempotentHint=False,
             openWorldHint=True,
         ),
     )
@@ -180,8 +184,9 @@ def register_layer1(
     @mcp.tool(
         annotations=ToolAnnotations(
             title="Enable an ad group (preview)",
-            readOnlyHint=True,
+            readOnlyHint=False,
             destructiveHint=False,
+            idempotentHint=False,
             openWorldHint=True,
         ),
     )
@@ -205,8 +210,9 @@ def register_layer1(
     @mcp.tool(
         annotations=ToolAnnotations(
             title="Pause a keyword (preview)",
-            readOnlyHint=True,
+            readOnlyHint=False,
             destructiveHint=False,
+            idempotentHint=False,
             openWorldHint=True,
         ),
     )
@@ -235,8 +241,9 @@ def register_layer1(
     @mcp.tool(
         annotations=ToolAnnotations(
             title="Enable a keyword (preview)",
-            readOnlyHint=True,
+            readOnlyHint=False,
             destructiveHint=False,
+            idempotentHint=False,
             openWorldHint=True,
         ),
     )
@@ -257,8 +264,9 @@ def register_layer1(
     @mcp.tool(
         annotations=ToolAnnotations(
             title="Set keyword CPC bid (preview)",
-            readOnlyHint=True,
+            readOnlyHint=False,
             destructiveHint=False,
+            idempotentHint=False,
             openWorldHint=True,
         ),
     )
@@ -298,8 +306,9 @@ def register_layer1(
     @mcp.tool(
         annotations=ToolAnnotations(
             title="Set campaign budget (preview)",
-            readOnlyHint=True,
+            readOnlyHint=False,
             destructiveHint=False,
+            idempotentHint=False,
             openWorldHint=True,
         ),
     )
@@ -341,8 +350,9 @@ def register_layer1(
     @mcp.tool(
         annotations=ToolAnnotations(
             title="Add a negative keyword (preview)",
-            readOnlyHint=True,
+            readOnlyHint=False,
             destructiveHint=False,
+            idempotentHint=False,
             openWorldHint=True,
         ),
     )
@@ -397,6 +407,83 @@ def register_layer1(
                 },
             )
         return await _preview(customer_id, op)
+
+    # ---------------- recommendations ---------------------------------------
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Apply a Google Ads recommendation",
+            readOnlyHint=False,
+            destructiveHint=True,
+            idempotentHint=False,
+            openWorldHint=True,
+        ),
+    )
+    @with_activity(activity, name="apply_recommendation")
+    async def apply_recommendation(  # pyright: ignore[reportUnusedFunction]
+        customer_id: Annotated[str, Field(description="10-digit customer ID.")],
+        recommendation_resource_name: Annotated[
+            str,
+            Field(
+                description=(
+                    "Full recommendation resource name, e.g. "
+                    "'customers/1234567890/recommendations/...'. Discover via GAQL "
+                    "on the `recommendation` resource."
+                ),
+            ),
+        ],
+    ) -> ApplyResult:
+        """Apply one Google Ads recommendation.
+
+        One-shot: Google validates the recommendation when surfacing it, so
+        there's no validate-only preview phase. The applied change is audited;
+        the resulting entity (e.g. a new keyword from a keyword recommendation)
+        shows up in Google Ads change history rather than this server's audit.
+        """
+
+        def go() -> ApplyResult:
+            check_customer_allowlist(customer_id, allowlist=allowlist)
+            try:
+                resource_names = recommendations_impl.apply_recommendation(
+                    client, customer_id, recommendation_resource_name
+                )
+            except Exception as e:
+                audit.record(
+                    AuditEvent(
+                        phase="apply",
+                        outcome="api_error",
+                        mutate_id=None,
+                        customer_id=customer_id,
+                        operations=None,
+                        resource_names=None,
+                        error_type=type(e).__name__,
+                        error_message=str(e),
+                        error_request_id=getattr(e, "request_id", None),
+                    )
+                )
+                raise
+
+            audit.record(
+                AuditEvent(
+                    phase="apply",
+                    outcome="ok",
+                    mutate_id=None,
+                    customer_id=customer_id,
+                    operations=None,
+                    resource_names=resource_names,
+                    error_type=None,
+                    error_message=None,
+                    error_request_id=None,
+                )
+            )
+            return ApplyResult(
+                mutate_id="",  # recommendations don't go through the pending store
+                customer_id=customer_id,
+                applied=True,
+                resource_names=resource_names,
+            )
+
+        return await asyncio.to_thread(go)
 
     # ---------------- account summary (read) --------------------------------
 

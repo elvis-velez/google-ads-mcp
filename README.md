@@ -86,6 +86,7 @@ args = ["google-ads-mcp"]
 | `set_keyword_bid(customer_id, criterion_resource_name, cpc_usd)` | 1 | Update a keyword's max CPC. USD → micros internally. |
 | `set_campaign_budget(customer_id, budget_id, daily_amount_usd)` | 1 | Preview a daily budget change. USD → micros internally. |
 | `add_negative_keyword(customer_id, scope, ref_id, text, match_type)` | 1 | Preview adding a campaign- or ad-group-level negative. |
+| `apply_recommendation(customer_id, recommendation_resource_name)` | 1 | Apply one Google Ads recommendation. One-shot (no validate/apply two-phase) since Google has already validated it. |
 | `account_summary(customer_id, date_range)` | 1 | Pre-baked GAQL: per-campaign performance, sorted by spend. |
 | `ping()` | — | Connectivity check. Returns `"pong"`. |
 
