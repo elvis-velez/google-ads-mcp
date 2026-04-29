@@ -32,6 +32,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     serve.set_defaults(func=_cmd_serve)
 
+    init = subparsers.add_parser(
+        "init",
+        help="Interactive first-run setup: OAuth, credentials.yaml, validation.",
+    )
+    init.set_defaults(func=_cmd_init)
+
     return parser
 
 
@@ -40,6 +46,12 @@ def _cmd_serve(_args: argparse.Namespace) -> int:
 
     run()
     return 0
+
+
+def _cmd_init(_args: argparse.Namespace) -> int:
+    from google_ads_mcp.auth.init_cmd import run_init
+
+    return run_init()
 
 
 def main(argv: Sequence[str] | None = None) -> int:
