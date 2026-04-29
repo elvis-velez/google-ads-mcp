@@ -61,10 +61,13 @@ def build_server(
     settings = settings or Settings()
     clock = clock or SystemClock()
 
+    bound_login_customer_id: str | None = None
     if client is None:
         if credentials_provider is None:
             credentials_provider = LocalRefreshTokenCredentials(settings.credentials_path)
-        client = build_client(credentials_provider.get())
+        creds = credentials_provider.get()
+        client = build_client(creds)
+        bound_login_customer_id = creds.login_customer_id
 
     audit = audit or JsonlAuditLogger(path=settings.audit_log_path, clock=clock)
     activity = activity or JsonlActivityLogger(
@@ -77,7 +80,7 @@ def build_server(
     )
     bound_client = client  # capture for the closure (lambda below)
     allowlist = allowlist or CustomerAllowlist(
-        fetch=lambda: accounts_impl.list_accessible(bound_client),
+        fetch=lambda: _fetch_allowlist(bound_client, bound_login_customer_id),
     )
 
     mcp = FastMCP("google-ads-mcp")
@@ -133,3 +136,29 @@ def run() -> None:
         server.run(transport="stdio")
     finally:
         _log.info("google-ads-mcp stopped")
+
+
+def _fetch_allowlist(client: Any, login_customer_id: str | None) -> list[str]:
+    """Build the customer-id allowlist: direct-accessible plus sub-accounts.
+
+    `ListAccessibleCustomers` only returns accounts the user is a direct
+    member of. Sub-accounts reached via a manager are missing — fixed here
+    by also walking `customer_client` under the configured manager. If the
+    sub-account walk fails (e.g. login_customer_id is itself a non-manager,
+    or the API rejects), we still return the direct list rather than
+    breaking allowlist construction entirely.
+    """
+    direct = accounts_impl.list_accessible(client)
+    if not login_customer_id:
+        return direct
+    try:
+        sub = accounts_impl.list_subaccounts(client, login_customer_id)
+    except Exception:
+        # Best-effort enrichment; never block server construction on this.
+        _log.warning(
+            "Sub-account enumeration via login_customer_id=%s failed; "
+            "allowlist falls back to direct-accessible only.",
+            login_customer_id,
+        )
+        return direct
+    return sorted(set(direct) | set(sub))
