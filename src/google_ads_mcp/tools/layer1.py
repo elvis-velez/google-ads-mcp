@@ -677,6 +677,11 @@ def register_layer1(
             idempotentHint=False,
             openWorldHint=True,
         ),
+        # action='results' fetches per-op outcomes (default page_size=1000;
+        # ~200 chars each) and routinely exceeds Claude Code's 100KB
+        # persist-to-disk threshold. Keep the response inline up to the
+        # documented hard ceiling so result-page outputs reach the LLM.
+        meta={"anthropic/maxResultSizeChars": 500_000},
     )
     @with_activity(activity, name="batch_job")
     async def batch_job(  # pyright: ignore[reportUnusedFunction]

@@ -57,6 +57,12 @@ def register_layer2(
             destructiveHint=False,
             openWorldHint=True,
         ),
+        # GAQL result rows can fill the configured byte cap (default 256KB),
+        # which exceeds Claude Code's default 100KB persist-to-disk
+        # threshold. Tell the host to keep responses inline up to the cap
+        # plus envelope; otherwise large query results land on disk and the
+        # LLM gets a file reference instead of the rows it asked for.
+        meta={"anthropic/maxResultSizeChars": 300_000},
     )
     @with_activity(activity, name="gaql")
     async def gaql(  # pyright: ignore[reportUnusedFunction]

@@ -19,8 +19,8 @@ concurrent applies but keeps reasoning simple.
 
 from __future__ import annotations
 
+import secrets
 import threading
-import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -28,6 +28,17 @@ from datetime import datetime, timedelta
 from google_ads_mcp.errors import PendingExpired, PendingNotFound
 from google_ads_mcp.observability.clock import Clock
 from google_ads_mcp.types import ApplyResult, CustomerId, PendingPayload
+
+
+def _default_id() -> str:
+    """Mint a short, prefixed, URL-safe id.
+
+    8 bytes of `secrets` rendered as 16 hex chars — collision risk is
+    negligible for an in-memory TTL'd store (~10^-15 even with 10^6 live
+    entries) and the `mut_` prefix disambiguates the id in mixed logs.
+    Short enough to fit on one line of a Claude-Code tool call summary.
+    """
+    return f"mut_{secrets.token_hex(8)}"
 
 
 @dataclass
@@ -53,7 +64,7 @@ class PendingStore:
         *,
         clock: Clock,
         ttl: timedelta,
-        id_factory: Callable[[], str] = lambda: str(uuid.uuid4()),
+        id_factory: Callable[[], str] = _default_id,
     ) -> None:
         self._entries: dict[str, _Entry] = {}
         self._lock = threading.Lock()
