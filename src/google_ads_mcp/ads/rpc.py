@@ -149,7 +149,11 @@ def _set_request_fields(
             )
         try:
             setattr(request, k, v)
-        except (AttributeError, TypeError, ValueError) as e:
+        except (AttributeError, TypeError, ValueError, KeyError) as e:
+            # KeyError surfaces from proto-plus enum lookup when the value
+            # isn't a valid enum name (e.g. category="LEAD" on a sub-message
+            # field that resolves to a different enum). Without explicit
+            # handling it leaks past as just "'LEAD'".
             raise ValidationFailed(
                 f"Cannot set {label}.{k}={v!r}: {e}"
             ) from e
