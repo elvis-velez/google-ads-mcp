@@ -16,9 +16,8 @@ import enum
 from typing import Any
 
 from google.ads.googleads.client import GoogleAdsClient
-from google.ads.googleads.errors import GoogleAdsException
 
-from google_ads_mcp.errors import ApiError
+from google_ads_mcp.ads._errors import translate_errors
 from google_ads_mcp.types import CustomerId, GaqlResult, GaqlRow  # GaqlRow is dict[str, Any]
 
 
@@ -38,7 +37,7 @@ def search(
     truncated = False
     truncation_reason: str | None = None
 
-    try:
+    with translate_errors(f"GAQL[customer={customer_id}]"):
         stream = service.search_stream(customer_id=customer_id, query=query)
         for batch in stream:
             paths = list(batch.field_mask.paths)
@@ -63,11 +62,6 @@ def search(
                     break
             if truncated:
                 break
-    except GoogleAdsException as e:
-        raise ApiError(
-            _format_failure(e),
-            request_id=getattr(e, "request_id", None),
-        ) from e
 
     return GaqlResult(
         rows=rows,
@@ -106,21 +100,3 @@ def _coerce(value: Any) -> Any:
 def _approximate_size(row: dict[str, Any]) -> int:
     """Rough byte cost of a row when rendered. Used to enforce `max_bytes`."""
     return sum(len(k) + len(repr(v)) for k, v in row.items())
-
-
-def _format_failure(e: GoogleAdsException) -> str:
-    """Render a GoogleAdsException's failure list compactly for error messages."""
-    failure = getattr(e, "failure", None)
-    if failure is None:
-        return str(e)
-    parts: list[str] = []
-    for err in failure.errors:
-        loc = ""
-        location = getattr(err, "location", None)
-        if location is not None and getattr(location, "field_path_elements", None):
-            loc = (
-                ":"
-                + ".".join(p.field_name for p in location.field_path_elements)
-            )
-        parts.append(f"{err.error_code}{loc}: {err.message}")
-    return "; ".join(parts) or str(e)

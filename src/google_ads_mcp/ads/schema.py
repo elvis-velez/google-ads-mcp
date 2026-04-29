@@ -8,9 +8,8 @@ changes rarely; the calling resource caches results for the server lifetime.
 from __future__ import annotations
 
 from google.ads.googleads.client import GoogleAdsClient
-from google.ads.googleads.errors import GoogleAdsException
 
-from google_ads_mcp.errors import ApiError
+from google_ads_mcp.ads._errors import translate_errors
 from google_ads_mcp.types import ResourceFields
 
 
@@ -23,24 +22,19 @@ def get_resource_fields(client: GoogleAdsClient, resource_type: str) -> Resource
         "SELECT name, selectable, filterable, sortable "
         f"WHERE name LIKE '{resource_type}.%'"
     )
-    try:
+    with translate_errors(f"GoogleAdsFieldService[{resource_type}]"):
         response = service.search_google_ads_fields(query=query)
-    except GoogleAdsException as e:
-        raise ApiError(
-            f"GoogleAdsFieldService query for resource '{resource_type}' failed: {e}",
-            request_id=getattr(e, "request_id", None),
-        ) from e
 
-    selectable: list[str] = []
-    filterable: list[str] = []
-    sortable: list[str] = []
-    for field in response:
-        if field.selectable:
-            selectable.append(field.name)
-        if field.filterable:
-            filterable.append(field.name)
-        if field.sortable:
-            sortable.append(field.name)
+        selectable: list[str] = []
+        filterable: list[str] = []
+        sortable: list[str] = []
+        for field in response:
+            if field.selectable:
+                selectable.append(field.name)
+            if field.filterable:
+                filterable.append(field.name)
+            if field.sortable:
+                sortable.append(field.name)
 
     return ResourceFields(
         resource_type=resource_type,
