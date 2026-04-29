@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import contextlib
 import functools
+import inspect
 import json
 from collections.abc import Awaitable, Callable, Generator
 from dataclasses import dataclass
@@ -148,24 +149,41 @@ def with_activity(
     schema generation still sees the real parameters.
 
     If `name` contains `{...}` placeholders (e.g. URI templates for
-    parameterized resources), they're rendered against the call's kwargs
+    parameterized resources), they're rendered against the call's args
     so the activity log shows `gads-schema://campaign` instead of the bare
-    template. Falls back to the literal `name` if a placeholder isn't
-    supplied — never breaks a tool call to log nicer text.
+    template. We bind positional args back to parameter names via
+    `inspect.signature` because FastMCP passes URI-template variables to
+    resource handlers positionally, not as kwargs — `name.format(**kwargs)`
+    alone would always fall back to the literal template for resources.
+    Falls back to the literal `name` if a placeholder isn't supplied —
+    never breaks a tool call to log nicer text.
     """
     is_template = "{" in name
 
     def decorator(handler: _HandlerT) -> _HandlerT:
+        # Resolve the handler's signature once at decoration time; binding at
+        # call time is then cheap.
+        signature = inspect.signature(handler) if is_template else None
+
         @functools.wraps(handler)
         async def wrapper(*args: Any, **kwargs: Any) -> Any:
+            full_args: dict[str, Any] = dict(kwargs)
+            if is_template and signature is not None:
+                try:
+                    bound = signature.bind(*args, **kwargs)
+                    bound.apply_defaults()
+                    full_args = dict(bound.arguments)
+                except TypeError:
+                    # Signature didn't bind cleanly — fall through with raw kwargs.
+                    pass
             if is_template:
                 try:
-                    rendered = name.format(**kwargs)
+                    rendered = name.format(**full_args)
                 except (KeyError, IndexError):
                     rendered = name
             else:
                 rendered = name
-            with recorder.record_call(kind=kind, name=rendered, args=kwargs):
+            with recorder.record_call(kind=kind, name=rendered, args=full_args):
                 return await handler(*args, **kwargs)
 
         return wrapper  # pyright: ignore[reportReturnType]

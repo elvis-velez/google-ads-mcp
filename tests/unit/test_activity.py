@@ -224,3 +224,34 @@ def test_decorator_falls_back_when_template_kwarg_missing(tmp_path: Path) -> Non
 
     entry = json.loads(log_path.read_text().splitlines()[0])
     assert entry["name"] == "gads-schema://{resource_type}"
+
+
+def test_decorator_renders_uri_template_with_positional_args(tmp_path: Path) -> None:
+    """FastMCP passes URI-template variables to resource handlers positionally,
+    not as kwargs. The decorator must bind positional args back to parameter
+    names via inspect.signature so multi-segment templates like
+    gads-rpc-schema://{service}/{method} render correctly."""
+    import asyncio
+
+    log_path = tmp_path / "activity.log"
+    clock = _AdvanceableClock(datetime(2026, 4, 28, tzinfo=UTC))
+    recorder = ActivityRecorder(
+        logger=JsonlActivityLogger(path=log_path, clock=clock),
+        clock=clock,
+    )
+
+    async def schema(service: str, method: str) -> str:
+        return f"{service}.{method}"
+
+    wrapped = with_activity(
+        recorder,
+        name="gads-rpc-schema://{service}/{method}",
+        kind="resource",
+    )(schema)
+
+    # Call positionally — same way FastMCP invokes resource handlers
+    # for parametric URI templates.
+    asyncio.run(wrapped("recommendation_service", "apply_recommendation"))
+
+    entry = json.loads(log_path.read_text().splitlines()[0])
+    assert entry["name"] == "gads-rpc-schema://recommendation_service/apply_recommendation"
