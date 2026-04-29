@@ -1,0 +1,72 @@
+"""Operation → OperationDiff renderer.
+
+The Google Ads API's `validate_only=true` returns yes/no plus policy
+findings but no diff. So we render our own — the LLM (and any human
+reviewing) sees a structured human-readable preview before committing.
+
+v1 renders the operation payload itself: clear and accurate but doesn't
+fetch current entity state for UPDATE ops. Phase 2.5 / 3 may add a
+"fetch current via GAQL, render before/after" mode keyed on resource type.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from google_ads_mcp.types import Operation, OperationDiff
+
+
+def render(op: Operation) -> OperationDiff:
+    """Build a human-readable preview of `op`."""
+    if op.op == "remove":
+        return _render_remove(op)
+    if op.op == "create":
+        return _render_create(op)
+    return _render_update(op)
+
+
+def _render_remove(op: Operation) -> OperationDiff:
+    rn = op.resource.get("resource_name", "<missing resource_name>")
+    return OperationDiff(
+        service=op.service,
+        op="remove",
+        summary=f"remove {op.service} {rn}",
+        detail=f"Will remove {op.service} resource: {rn}",
+    )
+
+
+def _render_create(op: Operation) -> OperationDiff:
+    lines = [f"Will create {op.service} with:"]
+    lines.extend(f"  {k}: {_render_value(v)}" for k, v in sorted(op.resource.items()))
+    return OperationDiff(
+        service=op.service,
+        op="create",
+        summary=f"create {op.service}",
+        detail="\n".join(lines),
+    )
+
+
+def _render_update(op: Operation) -> OperationDiff:
+    rn = op.resource.get("resource_name", "<missing resource_name>")
+    lines: list[str] = [f"Will update {op.service} {rn}"]
+    if op.update_mask:
+        lines.append("masked fields:")
+        for path in op.update_mask:
+            value = op.resource.get(path, "<not in payload>")
+            lines.append(f"  {path}: {_render_value(value)}")
+    else:
+        lines.append("(no update_mask supplied — the API will reject this)")
+    if op.force_override:
+        lines.append("force_override=true (threshold guardrails bypassed)")
+    return OperationDiff(
+        service=op.service,
+        op="update",
+        summary=f"update {op.service} {rn}",
+        detail="\n".join(lines),
+    )
+
+
+def _render_value(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    return repr(value)

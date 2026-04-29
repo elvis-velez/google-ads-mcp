@@ -93,7 +93,10 @@ class PendingStore:
                     "Re-issue the mutate to get a fresh id."
                 )
             if entry.applied_result is not None:
-                return entry.applied_result
+                # Idempotent re-apply: return the cached result with applied=False
+                # so callers can tell it didn't re-mutate. resource_names match
+                # the original commit.
+                return entry.applied_result.model_copy(update={"applied": False})
 
             result = applier(entry.customer_id, entry.operations)
             entry.applied_result = result

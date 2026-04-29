@@ -27,3 +27,18 @@ def test_skips_credential_loading_when_client_given(tmp_path: object) -> None:
     server = build_server(settings=settings, client=MagicMock())
 
     assert server.name == "google-ads-mcp"
+
+
+def test_wires_audit_and_pending(tmp_path: object) -> None:
+    """All Phase-2 dependencies are constructable from injected primitives;
+    no real I/O happens at build time."""
+    settings = Settings(
+        credentials_path=tmp_path / "nope.yaml",  # type: ignore[operator]
+        audit_log_path=tmp_path / "nope-audit.log",  # type: ignore[operator]
+    )
+
+    server = build_server(settings=settings, client=MagicMock())
+
+    # No audit file written just by constructing — proves IO is deferred.
+    assert not (tmp_path / "nope-audit.log").exists()  # type: ignore[operator]
+    assert server.name == "google-ads-mcp"

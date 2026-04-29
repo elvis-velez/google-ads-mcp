@@ -88,8 +88,9 @@ def test_apply_runs_applier_once() -> None:
     second = store.apply(mutate_id, applier)
 
     assert calls == 1
-    assert first == second
-    assert first.resource_names == ["customers/1234567890/campaigns/2"]
+    assert first.applied is True
+    assert second.applied is False  # re-apply returns cached result, didn't re-mutate
+    assert first.resource_names == second.resource_names == ["customers/1234567890/campaigns/2"]
 
 
 def test_unknown_mutate_id_raises() -> None:
