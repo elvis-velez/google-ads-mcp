@@ -56,8 +56,6 @@ def _render_update(op: Operation) -> OperationDiff:
             lines.append(f"  {path}: {_render_value(value)}")
     else:
         lines.append("(no update_mask supplied — the API will reject this)")
-    if op.force_override:
-        lines.append("force_override=true (threshold guardrails bypassed)")
     return OperationDiff(
         service=op.service,
         op="update",

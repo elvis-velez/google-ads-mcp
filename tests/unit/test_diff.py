@@ -77,15 +77,3 @@ def test_update_without_mask_warns() -> None:
     assert "no update_mask" in d.detail
 
 
-def test_update_force_override_is_visible() -> None:
-    op = Operation(
-        service="ad_group_criterion",
-        op="update",
-        resource={"resource_name": "x", "cpc_bid_micros": 100_000_000},
-        update_mask=["cpc_bid_micros"],
-        force_override=True,
-    )
-
-    d = diff.render(op)
-
-    assert "force_override" in d.detail

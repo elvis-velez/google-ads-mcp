@@ -43,10 +43,6 @@ def _default_activity_log_path() -> Path:
     return _xdg_data_home() / "google-ads-mcp" / "activity.log"
 
 
-def _default_limits_path() -> Path:
-    return _xdg_config_home() / "google-ads-mcp" / "limits.yaml"
-
-
 class Settings(BaseSettings):
     """Top-level server settings.
 
@@ -59,21 +55,17 @@ class Settings(BaseSettings):
     credentials_path: Path = Field(default_factory=_default_credentials_path)
     audit_log_path: Path = Field(default_factory=_default_audit_log_path)
     activity_log_path: Path = Field(default_factory=_default_activity_log_path)
-    limits_path: Path = Field(default_factory=_default_limits_path)
 
     # Hard caps on what a single GAQL call can return to the LLM. The byte
     # cap protects context window; the row cap protects against pathological
     # queries that ask for "all keywords" on a 50k-keyword account. When
     # either cap fires, the response is truncated and a reason is reported.
+    # These exist to protect the LLM, not the operator's spending — different
+    # concern from the (deliberately absent) CPC / budget caps.
     gaql_max_rows: int = Field(default=1000, gt=0, le=100_000)
     gaql_max_response_bytes: int = Field(default=256_000, gt=0)
 
-    # Mutate-path safety thresholds. Override per-op via Operation.force_override
-    # for CPC and budget; batch size and customer-allowlist are not overridable.
-    # Values in micros (1 USD = 1_000_000 micros).
-    cpc_max_micros: int = Field(default=50_000_000, gt=0)         # $50.00
-    budget_max_daily_micros: int = Field(default=1_000_000_000, gt=0)  # $1000.00
-    mutate_max_ops_per_call: int = Field(default=100, gt=0, le=10_000)
-    mutate_id_ttl_seconds: int = Field(default=900, gt=0)         # 15 minutes
+    # Mutate preview TTL — invariant about preview freshness, not policy.
+    mutate_id_ttl_seconds: int = Field(default=900, gt=0)  # 15 minutes
 
     log_level: LogLevel = "INFO"

@@ -22,9 +22,7 @@ from google_ads_mcp.ads import mutate as mutate_impl
 from google_ads_mcp.errors import PendingExpired, PendingNotFound
 from google_ads_mcp.observability.activity import ActivityRecorder, with_activity
 from google_ads_mcp.observability.audit import AuditEvent, AuditLogger
-from google_ads_mcp.safety import guardrails
-from google_ads_mcp.safety.allowlist import CustomerAllowlist
-from google_ads_mcp.safety.limits import LimitsConfig
+from google_ads_mcp.safety.allowlist import CustomerAllowlist, check_customer_allowlist
 from google_ads_mcp.safety.pending import PendingStore
 from google_ads_mcp.settings import Settings
 from google_ads_mcp.tools._flow import perform_mutate
@@ -40,7 +38,6 @@ def register_layer2(
     audit: AuditLogger,
     activity: ActivityRecorder,
     allowlist: CustomerAllowlist,
-    limits: LimitsConfig,
 ) -> None:
     """Register Layer 2 tools onto the given FastMCP server."""
 
@@ -82,7 +79,7 @@ def register_layer2(
         """
 
         def go() -> GaqlResult:
-            guardrails.check_customer_allowlist(customer_id, allowlist=allowlist)
+            check_customer_allowlist(customer_id, allowlist=allowlist)
             return gaql_impl.search(
                 client,
                 customer_id,
@@ -124,10 +121,9 @@ def register_layer2(
     ) -> MutatePreview:
         """Validate operations against the API and return a previewable mutate_id.
 
-        Runs server-side guardrails (customer-allowlist, batch-size, CPC,
-        budget), calls the API with `validate_only=true`, renders a per-
-        operation diff, and stores the operations under a `mutate_id`. Call
-        `apply(mutate_id)` to commit.
+        Verifies the customer-id allowlist, calls the API with
+        `validate_only=true`, renders a per-operation diff, and stores the
+        operations under a `mutate_id`. Call `apply(mutate_id)` to commit.
         """
 
         return await asyncio.to_thread(
@@ -135,9 +131,7 @@ def register_layer2(
             client=client,
             customer_id=customer_id,
             operations=operations,
-            settings=settings,
             allowlist=allowlist,
-            limits=limits,
             pending=pending,
             audit=audit,
         )

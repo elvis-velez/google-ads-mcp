@@ -1,10 +1,9 @@
 """Shared mutate-flow orchestrator.
 
 Both the Layer-2 `mutate` tool and every Layer-1 outcome tool walk the same
-safety steps: customer-allowlist check → batch-size cap → CPC/budget caps
-→ API validate-only → diff render → store under a mutate_id. Centralised
-here so the contract is one code path; tool-level files are pure Operation
-constructors that delegate.
+safety steps: customer-allowlist check → API validate-only → diff render →
+store under a mutate_id. Centralised here so the contract is one code path;
+tool-level files are pure Operation constructors that delegate.
 
 Every outcome (ok, guardrail_rejection, validation_failed, api_error)
 produces exactly one audit-log entry — failures included. That's the
@@ -22,11 +21,9 @@ from typing import Any
 from google_ads_mcp.ads import mutate as mutate_impl
 from google_ads_mcp.errors import ApiError, GuardrailViolation, ValidationFailed
 from google_ads_mcp.observability.audit import AuditEvent, AuditLogger
-from google_ads_mcp.safety import diff, guardrails
-from google_ads_mcp.safety.allowlist import CustomerAllowlist
-from google_ads_mcp.safety.limits import LimitsConfig
+from google_ads_mcp.safety import diff
+from google_ads_mcp.safety.allowlist import CustomerAllowlist, check_customer_allowlist
 from google_ads_mcp.safety.pending import PendingStore
-from google_ads_mcp.settings import Settings
 from google_ads_mcp.types import CustomerId, MutatePreview, Operation
 
 
@@ -35,9 +32,7 @@ def perform_mutate(
     client: Any,
     customer_id: CustomerId,
     operations: list[Operation],
-    settings: Settings,
     allowlist: CustomerAllowlist,
-    limits: LimitsConfig,
     pending: PendingStore,
     audit: AuditLogger,
 ) -> MutatePreview:
@@ -47,12 +42,7 @@ def perform_mutate(
     """
     # --- guardrails ---------------------------------------------------------
     try:
-        guardrails.check_customer_allowlist(customer_id, allowlist=allowlist)
-        guardrails.check_batch_size(operations, max_size=settings.mutate_max_ops_per_call)
-        account_limits = limits.for_customer(customer_id)
-        for op in operations:
-            guardrails.check_cpc(op, max_micros=account_limits.cpc_max_micros)
-            guardrails.check_budget(op, max_micros=account_limits.budget_max_daily_micros)
+        check_customer_allowlist(customer_id, allowlist=allowlist)
     except GuardrailViolation as e:
         audit.record(_event_error("preview", "guardrail_rejection", e, customer_id, operations))
         raise

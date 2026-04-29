@@ -1,12 +1,12 @@
 # google-ads-mcp
 
-A Model Context Protocol server for the Google Ads API. Lets you manage Google Ads campaigns from inside [Claude Code](https://claude.com/claude-code), [Codex](https://github.com/openai/codex), or any MCP-compatible client — with safe, two-phase mutations, hard guardrails, and an append-only audit log.
+A Model Context Protocol server for the Google Ads API. Lets you manage Google Ads campaigns from inside [Claude Code](https://claude.com/claude-code), [Codex](https://github.com/openai/codex), or any MCP-compatible client — with safe, two-phase mutations and an append-only audit log.
 
 > Status: alpha (v0.0.1). All structural code paths are in place; full end-to-end acceptance against a real account requires Basic Access on your dev token (1–3 business days from Google).
 
 ## Why a custom server
 
-Google ships an [official MCP](https://github.com/googleads/google-ads-mcp), but it's read-only by design — three tools, all reads. This one adds the writes you actually need to manage campaigns (pause, budgets, bids, negatives) with safety strong enough that an LLM can't accidentally set CPC to $1M.
+Google ships an [official MCP](https://github.com/googleads/google-ads-mcp), but it's read-only by design — three tools, all reads. This one adds the writes you actually need to manage campaigns (pause, budgets, bids, negatives) with the two-phase preview-then-apply contract that makes those writes safe for an LLM to drive.
 
 ## Architecture in one paragraph
 
@@ -83,7 +83,7 @@ args = ["google-ads-mcp"]
 | `pause_campaign` / `enable_campaign(customer_id, campaign_id)` | 1 | Preview pausing/enabling a campaign. |
 | `pause_ad_group` / `enable_ad_group(customer_id, ad_group_id)` | 1 | Granular pause/enable below the campaign level. |
 | `pause_keyword` / `enable_keyword(customer_id, criterion_resource_name)` | 1 | Pause/enable a single ad-group criterion. The most common tactical optimization. |
-| `set_keyword_bid(customer_id, criterion_resource_name, cpc_usd, force_override=false)` | 1 | Update a keyword's max CPC. USD → micros internally; subject to the CPC guardrail. |
+| `set_keyword_bid(customer_id, criterion_resource_name, cpc_usd)` | 1 | Update a keyword's max CPC. USD → micros internally. |
 | `set_campaign_budget(customer_id, budget_id, daily_amount_usd)` | 1 | Preview a daily budget change. USD → micros internally. |
 | `add_negative_keyword(customer_id, scope, ref_id, text, match_type)` | 1 | Preview adding a campaign- or ad-group-level negative. |
 | `account_summary(customer_id, date_range)` | 1 | Pre-baked GAQL: per-campaign performance, sorted by spend. |
@@ -95,28 +95,14 @@ Plus two resources:
 
 ## Safety model
 
-Every write is two-phase by default:
+The MCP server enforces server-side *invariants*, not your account's *policies*. The four things it guarantees:
 
-1. The LLM calls `mutate(...)` (or any Layer-1 outcome tool). The server runs guardrails, calls the API with `validate_only=true`, renders a per-operation diff, and stores the operations under a UUID `mutate_id` (15-minute TTL).
-2. The LLM (or the human reviewing the diff) calls `apply(mutate_id)` to commit. Re-applying the same id returns the cached result and does **not** re-call the API.
+1. **Two-phase writes.** The LLM calls `mutate(...)` (or any Layer-1 outcome tool). The server validates against the API with `validate_only=true`, renders a per-operation diff, and stores the operations under a UUID `mutate_id` (15-minute TTL). Nothing has happened on Google's side yet. The LLM (or the human reviewing the diff) calls `apply(mutate_id)` to commit. Re-applying the same id returns the cached result and does **not** re-call the API.
+2. **Customer-ID allowlist.** Refuses operations on accounts the credentials can't access. Real defense against an LLM hallucinating a customer_id.
+3. **Append-only audit log.** Every state-changing attempt — success, validation failure, API error, expired re-apply — gets a JSONL line at `~/.local/share/google-ads-mcp/audit.log` (mode `0600`). One file, one grep, the whole forensic story.
+4. **MCP `ToolAnnotations`.** Each tool declares whether it's `readOnlyHint`, `destructiveHint`, `idempotentHint`, etc. so MCP clients (Claude Code, Codex) can render confirmation prompts intelligently.
 
-Hard guardrails (server-enforced):
-
-- **Customer-ID allowlist** — refuses operations on accounts the credentials can't access.
-- **Batch size cap** — max 100 operations per call (not overridable; keeps diffs reviewable).
-- **CPC cap** — default $50; per-account override via `~/.config/google-ads-mcp/limits.yaml`. Override per-op via `force_override=true`.
-- **Daily budget cap** — default $1000; same override paths as CPC.
-
-Per-account threshold overrides (`~/.config/google-ads-mcp/limits.yaml`):
-
-```yaml
-defaults:
-  cpc_max_micros: 50000000
-
-per_account:
-  "1234567890":
-    cpc_max_micros: 200000000   # legal/finance vertical
-```
+What the server *deliberately doesn't* enforce: CPC caps, daily-budget caps, batch-size caps, or any other business rule about what bid is "too high" for your account. Those depend entirely on your vertical (insurance routinely bids $200; ecommerce hits diminishing returns at $5) — they're the operator's call, not the MCP server's. The two-phase preview is the actual safety mechanism: the new bid is in the diff before commit, where the LLM and the human can both see it.
 
 ## Observability
 
@@ -169,14 +155,10 @@ Settings load with this precedence: env vars (prefixed `GOOGLE_ADS_MCP_`) > comp
 | `credentials_path` | `~/.config/google-ads-mcp/credentials.yaml` | XDG-aware. |
 | `audit_log_path` | `~/.local/share/google-ads-mcp/audit.log` | XDG-aware. |
 | `activity_log_path` | `~/.local/share/google-ads-mcp/activity.log` | XDG-aware. |
-| `limits_path` | `~/.config/google-ads-mcp/limits.yaml` | Optional file. |
-| `gaql_max_rows` | `1000` | GAQL row cap. |
-| `gaql_max_response_bytes` | `256000` | Approximate; caps total response size returned to the LLM. |
-| `cpc_max_micros` | `50000000` ($50) | Default CPC cap. |
-| `budget_max_daily_micros` | `1000000000` ($1000) | Default daily budget cap. |
-| `mutate_max_ops_per_call` | `100` | Batch size cap. |
+| `gaql_max_rows` | `1000` | GAQL row cap (protects the LLM's context window). |
+| `gaql_max_response_bytes` | `256000` | Approximate response-size cap returned to the LLM. |
 | `mutate_id_ttl_seconds` | `900` (15 min) | TTL for previewed mutates. |
-| `log_level` | `INFO` | Server-level logging. |
+| `log_level` | `INFO` | Diagnostic stderr level. |
 
 ## Development
 
@@ -184,7 +166,7 @@ Settings load with this precedence: env vars (prefixed `GOOGLE_ADS_MCP_`) > comp
 git clone <this-repo>
 cd google-ads-mcp
 uv sync --group dev
-uv run pytest             # 74 unit tests
+uv run pytest             # 65 unit tests
 uv run ruff check .
 uv run pyright src tests  # strict mode
 ```

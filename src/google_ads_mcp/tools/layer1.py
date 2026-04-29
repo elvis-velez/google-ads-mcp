@@ -25,9 +25,7 @@ from pydantic import Field
 from google_ads_mcp.ads import gaql as gaql_impl
 from google_ads_mcp.observability.activity import ActivityRecorder, with_activity
 from google_ads_mcp.observability.audit import AuditLogger
-from google_ads_mcp.safety import guardrails
-from google_ads_mcp.safety.allowlist import CustomerAllowlist
-from google_ads_mcp.safety.limits import LimitsConfig
+from google_ads_mcp.safety.allowlist import CustomerAllowlist, check_customer_allowlist
 from google_ads_mcp.safety.pending import PendingStore
 from google_ads_mcp.settings import Settings
 from google_ads_mcp.tools._flow import perform_mutate
@@ -71,7 +69,6 @@ def register_layer1(
     settings: Settings,
     pending: PendingStore,
     allowlist: CustomerAllowlist,
-    limits: LimitsConfig,
     audit: AuditLogger,
     activity: ActivityRecorder,
 ) -> None:
@@ -83,9 +80,7 @@ def register_layer1(
             client=client,
             customer_id=customer_id,
             operations=[op],
-            settings=settings,
             allowlist=allowlist,
-            limits=limits,
             pending=pending,
             audit=audit,
         )
@@ -278,26 +273,15 @@ def register_layer1(
             float,
             Field(
                 gt=0,
-                description=(
-                    "New max CPC bid in USD. Converted to micros internally. "
-                    "Subject to the per-account CPC guardrail; set "
-                    "force_override=true to bypass for legitimate high-CPC "
-                    "verticals (audited)."
-                ),
+                description="New max CPC bid in USD. Converted to micros internally.",
             ),
         ],
-        force_override: Annotated[
-            bool,
-            Field(
-                description=(
-                    "Bypass the CPC cap guardrail for this op. Audited. Use "
-                    "only for legal/finance/insurance verticals where bids "
-                    ">$50 are normal."
-                ),
-            ),
-        ] = False,
     ) -> MutatePreview:
-        """Preview a keyword CPC bid change. USD → micros internally."""
+        """Preview a keyword CPC bid change. USD → micros internally.
+
+        The new bid will be visible in the diff before commit; use that
+        as the safety check rather than relying on a server-side cap.
+        """
         op = Operation(
             service="ad_group_criterion",
             op="update",
@@ -306,7 +290,6 @@ def register_layer1(
                 "cpc_bid_micros": round(cpc_usd * _USD_TO_MICROS),
             },
             update_mask=["cpc_bid_micros"],
-            force_override=force_override,
         )
         return await _preview(customer_id, op)
 
@@ -453,7 +436,7 @@ def register_layer1(
         )
 
         def go() -> GaqlResult:
-            guardrails.check_customer_allowlist(customer_id, allowlist=allowlist)
+            check_customer_allowlist(customer_id, allowlist=allowlist)
             return gaql_impl.search(
                 client,
                 customer_id,

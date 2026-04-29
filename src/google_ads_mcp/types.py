@@ -91,10 +91,6 @@ class Operation(BaseModel):
     fields — for create/update, the entity payload; for remove, just
     `resource_name`. `update_mask` is required for updates (the SDK rejects
     field changes that aren't masked) and ignored for create/remove.
-
-    `force_override=True` bypasses threshold guardrails (CPC/budget caps)
-    for this single operation. Batch-size and customer-allowlist guardrails
-    are not overridable.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -117,14 +113,6 @@ class Operation(BaseModel):
         description=(
             "Required for update ops; list of dotted field paths being changed. "
             "Omit for create/remove."
-        ),
-    )
-    force_override: bool = Field(
-        default=False,
-        description=(
-            "If true, threshold guardrails (CPC, budget) are bypassed for this "
-            "operation. Audit log records the bypass. Cannot bypass batch-size "
-            "or customer-allowlist guardrails."
         ),
     )
 

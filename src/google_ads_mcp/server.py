@@ -30,7 +30,6 @@ from google_ads_mcp.observability.clock import Clock, SystemClock
 from google_ads_mcp.resources.accounts import register_accounts
 from google_ads_mcp.resources.schema import register_schema
 from google_ads_mcp.safety.allowlist import CustomerAllowlist
-from google_ads_mcp.safety.limits import Limits, LimitsConfig, load_limits
 from google_ads_mcp.safety.pending import PendingStore
 from google_ads_mcp.settings import Settings
 from google_ads_mcp.tools.layer1 import register_layer1
@@ -49,7 +48,6 @@ def build_server(
     activity: ActivityLogger | None = None,
     pending: PendingStore | None = None,
     allowlist: CustomerAllowlist | None = None,
-    limits: LimitsConfig | None = None,
 ) -> FastMCP:
     """Construct and configure the MCP server.
 
@@ -79,13 +77,6 @@ def build_server(
     allowlist = allowlist or CustomerAllowlist(
         fetch=lambda: accounts_impl.list_accessible(bound_client),
     )
-    limits = limits or load_limits(
-        settings.limits_path,
-        baseline=Limits(
-            cpc_max_micros=settings.cpc_max_micros,
-            budget_max_daily_micros=settings.budget_max_daily_micros,
-        ),
-    )
 
     mcp = FastMCP("google-ads-mcp")
 
@@ -109,7 +100,6 @@ def build_server(
         audit=audit,
         activity=activity_recorder,
         allowlist=allowlist,
-        limits=limits,
     )
     register_layer1(
         mcp,
@@ -117,7 +107,6 @@ def build_server(
         settings=settings,
         pending=pending,
         allowlist=allowlist,
-        limits=limits,
         audit=audit,
         activity=activity_recorder,
     )
@@ -125,10 +114,9 @@ def build_server(
     register_schema(mcp, client=client, activity=activity_recorder)
 
     _log.info(
-        "server constructed (audit=%s activity=%s limits=%s)",
+        "server constructed (audit=%s activity=%s)",
         settings.audit_log_path,
         settings.activity_log_path,
-        settings.limits_path,
     )
 
     return mcp
