@@ -11,7 +11,7 @@ fetch current entity state for UPDATE ops. Phase 2.5 / 3 may add a
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from google_ads_mcp.types import Operation, OperationDiff, RpcCall, RpcCallDiff
 
@@ -52,8 +52,9 @@ def _render_update(op: Operation) -> OperationDiff:
     if op.update_mask:
         lines.append("masked fields:")
         for path in op.update_mask:
-            value = op.resource.get(path, "<not in payload>")
-            lines.append(f"  {path}: {_render_value(value)}")
+            value = _resolve_path(op.resource, path)
+            rendered = _render_value(value) if value is not _MISSING else "<not in payload>"
+            lines.append(f"  {path}: {rendered}")
     else:
         lines.append("(no update_mask supplied — the API will reject this)")
     return OperationDiff(
@@ -62,6 +63,30 @@ def _render_update(op: Operation) -> OperationDiff:
         summary=f"update {op.service} {rn}",
         detail="\n".join(lines),
     )
+
+
+_MISSING: Any = object()
+
+
+def _resolve_path(resource: dict[str, Any], path: str) -> Any:
+    """Resolve a dotted update_mask path against a resource dict.
+
+    Tries the full path as a flat key first (covers the common single-segment
+    case like 'status'), then walks nested dicts segment-by-segment for
+    paths like 'target_spend.target_spend_micros'. Returns `_MISSING` when
+    no value resolves so the caller can render `<not in payload>`.
+    """
+    if path in resource:
+        return resource[path]
+    value: Any = resource
+    for part in path.split("."):
+        if not isinstance(value, dict):
+            return _MISSING
+        nested = cast("dict[str, Any]", value)
+        if part not in nested:
+            return _MISSING
+        value = nested[part]
+    return value
 
 
 def _render_value(value: Any) -> str:

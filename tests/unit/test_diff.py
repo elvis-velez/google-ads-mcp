@@ -77,6 +77,40 @@ def test_update_without_mask_warns() -> None:
     assert "no update_mask" in d.detail
 
 
+def test_update_renders_nested_dotted_mask_path() -> None:
+    """Dotted update_mask paths (e.g. 'target_spend.target_spend_micros')
+    should walk into nested dicts, not look up the dotted string as a flat key."""
+    op = Operation(
+        service="campaign",
+        op="update",
+        resource={
+            "resource_name": "customers/1/campaigns/2",
+            "target_spend": {"target_spend_micros": 5_000_000},
+        },
+        update_mask=["target_spend.target_spend_micros"],
+    )
+
+    d = diff.render(op)
+
+    assert "target_spend.target_spend_micros: 5000000" in d.detail
+    assert "<not in payload>" not in d.detail
+
+
+def test_update_renders_missing_path_with_marker() -> None:
+    """When the update_mask names a field absent from the resource dict,
+    the renderer flags it explicitly so the LLM can spot the inconsistency."""
+    op = Operation(
+        service="campaign",
+        op="update",
+        resource={"resource_name": "customers/1/campaigns/2"},
+        update_mask=["status"],
+    )
+
+    d = diff.render(op)
+
+    assert "status: <not in payload>" in d.detail
+
+
 # === RPC-call diffs ========================================================
 
 
