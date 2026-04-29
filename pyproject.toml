@@ -58,6 +58,12 @@ select = [
     "SIM",  # flake8-simplify
     "RUF",  # ruff-specific
 ]
+ignore = [
+    # Exception names: we use condition-style names (GuardrailViolation, PendingExpired)
+    # because they read naturally at use sites (`except PendingExpired:`). Hierarchy is
+    # clear via the AdsMcpError base; -Error suffix would just be noise.
+    "N818",
+]
 
 [tool.pyright]
 include = ["src", "tests"]
