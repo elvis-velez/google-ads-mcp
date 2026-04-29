@@ -48,3 +48,31 @@ class GaqlResult(BaseModel):
     total_rows_returned: int
     truncated: bool
     truncation_reason: str | None = None
+
+
+class ResourceFields(BaseModel):
+    """Field metadata for a single Google Ads resource type.
+
+    Returned by the `gads-schema://{resource_type}` MCP resource. Fields are
+    partitioned by use: SELECT-able, WHERE-able, and ORDER BY-able. The same
+    name often appears in multiple lists.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    resource_type: str
+    selectable: list[str]
+    filterable: list[str]
+    sortable: list[str]
+
+
+class AccessibleAccounts(BaseModel):
+    """Customer IDs the current credentials can operate on.
+
+    Returned by the `gads-account://accessible` MCP resource. IDs are
+    10-digit strings, no dashes, sorted lexicographically.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    customer_ids: list[CustomerId]

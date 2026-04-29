@@ -1,32 +1,69 @@
 """FastMCP server entry point.
 
-Builds the MCP server, registers tools / resources / prompts, and runs the
-chosen transport. Phase 0 has only a `ping` tool to validate the wiring;
-real tooling lands in later phases.
+`build_server()` is the dependency-injection seam: production wires real
+settings, credentials, and an SDK client; tests pass fakes (or a pre-built
+mock client) to keep unit tests credential-free.
+
+`run()` is the production hook used by the `serve` CLI subcommand.
 """
 
 from __future__ import annotations
 
+from typing import Any
+
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
+
+from google_ads_mcp.ads.client import build_client
+from google_ads_mcp.auth.credentials import CredentialsProvider
+from google_ads_mcp.auth.local import LocalRefreshTokenCredentials
+from google_ads_mcp.resources.accounts import register_accounts
+from google_ads_mcp.resources.schema import register_schema
+from google_ads_mcp.settings import Settings
+from google_ads_mcp.tools.layer2 import register_layer2
 
 
-def build_server() -> FastMCP:
+def build_server(
+    *,
+    settings: Settings | None = None,
+    credentials_provider: CredentialsProvider | None = None,
+    client: Any | None = None,
+) -> FastMCP:
     """Construct and configure the MCP server.
 
-    Centralised so tests can build a fresh server without running it, and so
-    later phases have one place to wire in injected dependencies.
+    Inject `settings`, `credentials_provider`, or `client` for tests. When
+    `client` is given, credential loading is skipped entirely — that's how
+    unit tests build a server without touching credentials.yaml.
     """
+    settings = settings or Settings()
+
+    if client is None:
+        if credentials_provider is None:
+            credentials_provider = LocalRefreshTokenCredentials(settings.credentials_path)
+        client = build_client(credentials_provider.get())
+
     mcp = FastMCP("google-ads-mcp")
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Connectivity ping",
+            readOnlyHint=True,
+            destructiveHint=False,
+            openWorldHint=False,
+        ),
+    )
     def ping() -> str:  # pyright: ignore[reportUnusedFunction]
         """Returns 'pong'. Smoke test that the server is reachable."""
         return "pong"
+
+    register_layer2(mcp, client=client, settings=settings)
+    register_accounts(mcp, client=client)
+    register_schema(mcp, client=client)
 
     return mcp
 
 
 def run() -> None:
-    """Run the server over stdio. Default transport for local MCP clients."""
+    """Run the server over stdio. Entry point for the `serve` subcommand."""
     server = build_server()
     server.run(transport="stdio")
