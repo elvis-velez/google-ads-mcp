@@ -3,42 +3,48 @@
 Anything in this module is safe to import from any layer. It must not import
 `google.ads.googleads.*` (or any other vendor type) so the rest of the codebase
 can be tested without the SDK installed.
+
+Pydantic models give us free JSON-schema generation at the MCP boundary.
+Where validation is meaningless (string aliases, raw row dicts), we stay
+type-only.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field
 
 # Google Ads customer IDs are 10-digit numeric strings (no dashes). We keep
 # this as a plain `str` alias for ergonomics; validation lives at the boundary
 # where strings cross from MCP input into the SDK.
 CustomerId = str
 
-
-@dataclass(frozen=True, slots=True)
-class GaqlRow:
-    """A single GAQL result row, flat-keyed by the field path used in SELECT.
-
-    The SDK returns rows as nested protos (`row.campaign.id`, `row.metrics.cost_micros`).
-    We flatten to dotted keys (`{"campaign.id": ..., "metrics.cost_micros": ...}`)
-    so the LLM sees the same notation it wrote in the query.
-    """
-
-    fields: dict[str, Any]
+# A single GAQL result row: flat dict keyed by the dotted field path used in
+# SELECT. e.g. {"campaign.id": 42, "campaign.name": "Brand US"}.
+# Kept as `dict[str, Any]` rather than a wrapper model so JSON output to the
+# LLM doesn't gain a useless `{"fields": {...}}` envelope around each row.
+GaqlRow = dict[str, Any]
 
 
-@dataclass(frozen=True, slots=True)
-class GaqlResult:
+class GaqlResult(BaseModel):
     """Outcome of a GAQL query.
 
-    `truncated` indicates that we stopped iterating before exhausting the
-    server's result set (row cap or byte budget hit). `truncation_reason` is
-    a short human-readable explanation suitable for showing to the LLM so it
-    can decide whether to refine the query or page through.
+    Rows arrive flat-keyed using the dotted paths from the SELECT clause.
+    `truncated` indicates that we stopped before exhausting the server's
+    result set (row cap or byte budget hit); `truncation_reason` tells the
+    caller why so it can decide whether to refine, narrow, or page with
+    LIMIT/OFFSET.
     """
 
-    rows: list[GaqlRow]
+    model_config = ConfigDict(frozen=True)
+
+    rows: list[GaqlRow] = Field(
+        description=(
+            "List of result rows; each row is a flat object keyed by the dotted "
+            "field path used in the GAQL SELECT clause."
+        ),
+    )
     total_rows_returned: int
     truncated: bool
     truncation_reason: str | None = None
