@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from google_ads_mcp.safety import diff
-from google_ads_mcp.types import Operation
+from google_ads_mcp.types import Operation, RpcCall
 
 
 def test_remove_renders_resource_name() -> None:
@@ -77,3 +77,49 @@ def test_update_without_mask_warns() -> None:
     assert "no update_mask" in d.detail
 
 
+# === RPC-call diffs ========================================================
+
+
+def test_render_rpc_call_summary_and_detail() -> None:
+    rpc = RpcCall(
+        service="recommendation_service",
+        method="apply_recommendation",
+        params={"resource_name": "customers/1/recommendations/abc"},
+    )
+
+    d = diff.render_rpc_call(rpc)
+
+    assert d.kind == "rpc_call"
+    assert d.service == "recommendation_service"
+    assert d.method == "apply_recommendation"
+    assert d.summary == "rpc recommendation_service.apply_recommendation"
+    assert d.detail.startswith(
+        "Will call recommendation_service.apply_recommendation with:"
+    )
+    assert "resource_name: customers/1/recommendations/abc" in d.detail
+
+
+def test_render_rpc_call_with_no_params() -> None:
+    rpc = RpcCall(
+        service="payments_account_service",
+        method="list_payments_accounts",
+        params={},
+    )
+
+    d = diff.render_rpc_call(rpc)
+
+    assert "(no params)" in d.detail
+
+
+def test_render_rpc_call_sorts_params() -> None:
+    """Detail lines list params in sorted order — stable diffs across runs."""
+    rpc = RpcCall(
+        service="experiment_service",
+        method="promote_experiment",
+        params={"zeta": 1, "alpha": 2, "mu": 3},
+    )
+
+    d = diff.render_rpc_call(rpc)
+
+    detail_lines = d.detail.splitlines()[1:]  # skip the leading "Will call ..." line
+    assert detail_lines == ["  alpha: 2", "  mu: 3", "  zeta: 1"]

@@ -129,10 +129,10 @@ def register_layer2(
             Field(
                 description=(
                     "Snake_case RPC method, e.g. 'generate_keyword_ideas'. "
-                    "Must be a read-only method (get_*, list_*, search_*, "
-                    "generate_*, suggest_*, fetch_*); writes go through "
-                    "call_mutate_rpc. See gads-rpc-schema://{service}/{method} "
-                    "for request fields."
+                    "Must be a read-only method (prefixes: get_, list_, search "
+                    "(covers search and search_stream), generate_, suggest_, "
+                    "fetch_); writes go through call_mutate_rpc. See "
+                    "gads-rpc-schema://{service}/{method} for request fields."
                 ),
             ),
         ],
@@ -203,9 +203,12 @@ def register_layer2(
             Field(
                 description=(
                     "List of mutate operations. Each has service (snake_case, e.g. "
-                    "'campaign'), op (create/update/remove), resource (fields), and "
-                    "update_mask (required for update). v1 supports campaign only at "
-                    "Layer 2; use Layer-1 outcome tools for other services."
+                    "'campaign', 'ad_group', 'campaign_budget'), op "
+                    "(create/update/remove), resource (fields), and update_mask "
+                    "(required for update). Routes to GoogleAdsService.Mutate, so "
+                    "any service that exposes a unified MutateOperation works. "
+                    "Use Layer-1 outcome tools when one fits — they already pick "
+                    "the right service/op shape."
                 ),
             ),
         ],

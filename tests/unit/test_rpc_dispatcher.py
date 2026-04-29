@@ -255,3 +255,105 @@ def test_catalog_marks_read_only_methods() -> None:
     assert by_method[
         ("invoice_service", "list_invoices")
     ].read_only is True
+
+
+# === request_schema introspection ==========================================
+
+
+class _RealClient:
+    """Resolves request types via the real SDK package; needs no credentials."""
+
+    def get_service(self, name: str) -> Any:
+        # request_schema validates the service exists by calling get_service.
+        # Returning a sentinel is enough — request_schema doesn't dispatch.
+        if name in {
+            "RecommendationService",
+            "KeywordPlanIdeaService",
+            "InvoiceService",
+        }:
+            return SimpleNamespace()
+        raise ValueError(name)
+
+    def get_type(self, name: str) -> Any:
+        from importlib import import_module
+
+        for mod_name in (
+            "google.ads.googleads.v24.services.types.recommendation_service",
+            "google.ads.googleads.v24.services.types.keyword_plan_idea_service",
+            "google.ads.googleads.v24.services.types.invoice_service",
+        ):
+            m = import_module(mod_name)
+            if hasattr(m, name):
+                return getattr(m, name)()
+        raise ValueError(name)
+
+
+def test_request_schema_returns_fields_and_oneofs() -> None:
+    schema = rpc_impl.request_schema(
+        _RealClient(),  # type: ignore[arg-type]
+        "keyword_plan_idea_service",
+        "generate_keyword_ideas",
+    )
+
+    assert schema["service"] == "keyword_plan_idea_service"
+    assert schema["method"] == "generate_keyword_ideas"
+    assert schema["request_type"] == "GenerateKeywordIdeasRequest"
+
+    field_names = {f["name"] for f in schema["fields"]}
+    assert "customer_id" in field_names
+    assert "language" in field_names
+    assert "keyword_seed" in field_names
+    assert "url_seed" in field_names
+
+    # The 'seed' oneof groups the four seed alternatives.
+    oneof_by_name = {o["name"]: o for o in schema["oneof_groups"]}
+    assert "seed" in oneof_by_name
+    assert set(oneof_by_name["seed"]["fields"]) == {
+        "keyword_and_url_seed", "keyword_seed", "url_seed", "site_seed",
+    }
+
+
+def test_request_schema_marks_repeated_fields() -> None:
+    schema = rpc_impl.request_schema(
+        _RealClient(),  # type: ignore[arg-type]
+        "keyword_plan_idea_service",
+        "generate_keyword_ideas",
+    )
+    by_name = {f["name"]: f for f in schema["fields"]}
+    # geo_target_constants is `repeated string`
+    assert by_name["geo_target_constants"]["label"] == "REPEATED"
+    # customer_id is a regular optional string
+    assert by_name["customer_id"]["label"] == "OPTIONAL"
+    assert by_name["customer_id"]["type"] == "string"
+
+
+def test_request_schema_unknown_service_raises() -> None:
+    with pytest.raises(ValidationFailed, match="Unknown Google Ads service"):
+        rpc_impl.request_schema(
+            _RealClient(),  # type: ignore[arg-type]
+            "nope_service",
+            "do_thing",
+        )
+
+
+def test_request_schema_unknown_method_raises() -> None:
+    with pytest.raises(ValidationFailed, match="No request type"):
+        rpc_impl.request_schema(
+            _RealClient(),  # type: ignore[arg-type]
+            "recommendation_service",
+            "definitely_not_a_method",
+        )
+
+
+def test_request_supports_validate_only() -> None:
+    client = _RealClient()
+    # ApplyRecommendationRequest doesn't have validate_only.
+    assert (
+        rpc_impl.request_supports_validate_only(client, "apply_recommendation")  # type: ignore[arg-type]
+        is False
+    )
+    # GenerateKeywordIdeasRequest doesn't either.
+    assert (
+        rpc_impl.request_supports_validate_only(client, "generate_keyword_ideas")  # type: ignore[arg-type]
+        is False
+    )
