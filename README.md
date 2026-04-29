@@ -17,38 +17,52 @@ An MCP server for managing Google Ads accounts. Reads via GAQL, writes via two-p
 - **MCP tool annotations** — every tool declares `readOnlyHint`, `destructiveHint`, `idempotentHint` so clients render confirmations correctly.
 - **Local-only OAuth.** Credentials at `~/.config/google-ads-mcp/credentials.yaml` (mode `0600`). No SaaS, no per-seat anything.
 
-## Install
+## Prerequisites
 
-Install from source (PyPI publishing is on the roadmap; not available yet):
+Set these up before installing the server. They're Google's processes, not ours, so we can't automate them.
+
+1. **Python 3.13** and [**uv**](https://docs.astral.sh/uv/getting-started/installation/).
+2. **Google Cloud project** with the [Google Ads API enabled](https://console.cloud.google.com/apis/library/googleads.googleapis.com) and an [OAuth 2.0 "Desktop app" client](https://developers.google.com/google-ads/api/docs/oauth/cloud-project) configured. Download the client JSON — you'll point at it during setup. ~5 minutes in the Cloud Console.
+3. **Developer token** from the [Google Ads API Center](https://ads.google.com/aw/apicenter). Basic Access approval takes 1–3 business days. Test-only tokens work immediately against [Google Ads test accounts](https://developers.google.com/google-ads/api/docs/best-practices/test-accounts) — recommended for development.
+4. *(Optional)* **Manager (MCC) account ID** if your dev token belongs to a manager and you want to operate on its sub-accounts.
+
+## Installation
+
+PyPI publishing is on the roadmap but not done yet — install from source:
 
 ```sh
 git clone https://github.com/ball2jh/google-ads-mcp.git
 cd google-ads-mcp
 uv sync
-uv run google-ads-mcp init      # interactive setup
-uv run google-ads-mcp validate  # re-validate without redoing OAuth
 ```
 
-## First-run setup
+## Setup
 
-`google-ads-mcp init` walks you through:
+### 1. Run the interactive wizard
 
-1. **OAuth client** — create a Google Cloud project, enable the Google Ads API, create a "Desktop app" OAuth client. ~5 minutes in the Cloud Console.
-2. **Developer token** — apply at [apicenter](https://ads.google.com/aw/apicenter). Approval takes 1–3 business days. Test-only tokens work immediately for [Google Ads test accounts](https://developers.google.com/google-ads/api/docs/best-practices/test-accounts).
-3. **Manager (MCC) account ID** — only if your dev token belongs to a manager and you want to operate on its sub-accounts. Dashes are stripped automatically.
-4. **OAuth consent** — opens a browser, runs the loopback flow on a free localhost port, captures a refresh token.
+```sh
+uv run google-ads-mcp init
+```
+
+`init` will prompt for:
+- The path to your OAuth client JSON
+- Your developer token
+- Your Manager (MCC) ID (skip if not applicable; dashes are stripped automatically)
+- OAuth consent in your browser — it opens a localhost loopback flow on a free port and captures the resulting refresh token
 
 Credentials persist to `~/.config/google-ads-mcp/credentials.yaml` (mode `0600`).
 
-If validation fails after credentials are saved (e.g., your Cloud project hasn't enabled the Google Ads API yet), **don't re-run `init`** — that burns another OAuth refresh token. Fix the underlying issue, then run:
+### 2. Verify
 
 ```sh
 uv run google-ads-mcp validate
 ```
 
-## Wire it into your MCP client
+This re-runs the credential checks without redoing OAuth. If validation fails (e.g., your Cloud project hasn't enabled the Google Ads API yet), fix the upstream issue and run `validate` again — **don't re-run `init`**, that burns another OAuth refresh token.
 
-Point your client at the cloned checkout. Replace `/path/to/google-ads-mcp` with the absolute path to wherever you cloned this repo.
+## Connect it to your MCP client
+
+Replace `/path/to/google-ads-mcp` below with the absolute path where you cloned this repo.
 
 ### Claude Code
 
@@ -58,13 +72,17 @@ claude mcp add google-ads -- uv run --directory /path/to/google-ads-mcp google-a
 
 ### Codex
 
-In `~/.codex/config.toml`:
+Add to `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.google-ads]
 command = "uv"
 args = ["run", "--directory", "/path/to/google-ads-mcp", "google-ads-mcp"]
 ```
+
+### Other MCP clients
+
+The server runs over stdio. Point your client at the same `uv run --directory /path/to/google-ads-mcp google-ads-mcp` invocation in whatever shape its config expects.
 
 ## Tool surface
 
