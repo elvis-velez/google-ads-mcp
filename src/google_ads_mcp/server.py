@@ -9,6 +9,7 @@ mock client) to keep unit tests credential-free.
 
 from __future__ import annotations
 
+import logging
 from datetime import timedelta
 from typing import Any
 
@@ -34,6 +35,8 @@ from google_ads_mcp.safety.pending import PendingStore
 from google_ads_mcp.settings import Settings
 from google_ads_mcp.tools.layer1 import register_layer1
 from google_ads_mcp.tools.layer2 import register_layer2
+
+_log = logging.getLogger(__name__)
 
 
 def build_server(
@@ -121,10 +124,21 @@ def build_server(
     register_accounts(mcp, allowlist=allowlist, activity=activity_recorder)
     register_schema(mcp, client=client, activity=activity_recorder)
 
+    _log.info(
+        "server constructed (audit=%s activity=%s limits=%s)",
+        settings.audit_log_path,
+        settings.activity_log_path,
+        settings.limits_path,
+    )
+
     return mcp
 
 
 def run() -> None:
     """Run the server over stdio. Entry point for the `serve` subcommand."""
+    _log.info("starting google-ads-mcp on stdio transport")
     server = build_server()
-    server.run(transport="stdio")
+    try:
+        server.run(transport="stdio")
+    finally:
+        _log.info("google-ads-mcp stopped")

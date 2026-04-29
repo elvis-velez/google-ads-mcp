@@ -48,8 +48,14 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _cmd_serve(_args: argparse.Namespace) -> int:
+    from google_ads_mcp.observability.diagnostics import setup_logging
     from google_ads_mcp.server import run
+    from google_ads_mcp.settings import Settings
 
+    # Diagnostics only makes sense for the long-lived `serve` path; the
+    # interactive `init`/`validate` commands print their own UX and adding
+    # log noise would clutter the wizard output.
+    setup_logging(Settings().log_level)
     run()
     return 0
 

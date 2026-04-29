@@ -116,10 +116,46 @@ per_account:
     cpc_max_micros: 200000000   # legal/finance vertical
 ```
 
-Audit log: every successful `apply` writes a JSONL line to `~/.local/share/google-ads-mcp/audit.log` (mode `0600`). Schema:
+## Observability
+
+Three distinct logs, each with a different audience:
+
+| Log | Path | Format | What it records |
+|---|---|---|---|
+| **Audit** | `~/.local/share/google-ads-mcp/audit.log` | JSONL, mode `0600` | Every state-changing *attempt* — success, guardrail rejection, validation failure, API error, expired/cached re-apply. The forensic answer to "did the LLM do X on this account?" |
+| **Activity** | `~/.local/share/google-ads-mcp/activity.log` | JSONL | Every tool/resource call: name, args summary, duration_ms, outcome. Reads included. The debugging answer to "what was the LLM doing yesterday?" |
+| **Diagnostics** | stderr | text | Server lifecycle (start/stop, config paths) and operator-facing warnings. The MCP host (Claude Code, Codex) shows this in its debug pane. |
+
+Audit and activity are write-once-per-line (POSIX append is atomic up to 4KB). The diagnostic log is configurable via the `log_level` setting; audit and activity are always on.
+
+**Audit schema** (one JSON object per line):
 
 ```json
-{"timestamp":"...","mutate_id":"...","customer_id":"...","operations":[...],"resource_names":[...]}
+{
+  "timestamp": "2026-04-28T18:30:15.123456+00:00",
+  "phase":     "preview" | "apply",
+  "outcome":   "ok" | "guardrail_rejection" | "validation_failed"
+               | "api_error" | "expired" | "not_found" | "cached_replay",
+  "mutate_id": "...",
+  "customer_id": "1234567890",
+  "operations": [{...}],
+  "result":    {"resource_names": [...]} | null,
+  "error":     {"type": "...", "message": "...", "request_id": "..."} | null
+}
+```
+
+**Activity schema**:
+
+```json
+{
+  "timestamp":    "...",
+  "kind":         "tool" | "resource",
+  "name":         "pause_campaign",
+  "args_summary": {...},
+  "duration_ms":  123,
+  "outcome":      "ok" | "error",
+  "error":        {"type": "...", "message": "..."} | null
+}
 ```
 
 ## Configuration
@@ -130,6 +166,7 @@ Settings load with this precedence: env vars (prefixed `GOOGLE_ADS_MCP_`) > comp
 |---|---|---|
 | `credentials_path` | `~/.config/google-ads-mcp/credentials.yaml` | XDG-aware. |
 | `audit_log_path` | `~/.local/share/google-ads-mcp/audit.log` | XDG-aware. |
+| `activity_log_path` | `~/.local/share/google-ads-mcp/activity.log` | XDG-aware. |
 | `limits_path` | `~/.config/google-ads-mcp/limits.yaml` | Optional file. |
 | `gaql_max_rows` | `1000` | GAQL row cap. |
 | `gaql_max_response_bytes` | `256000` | Approximate; caps total response size returned to the LLM. |
