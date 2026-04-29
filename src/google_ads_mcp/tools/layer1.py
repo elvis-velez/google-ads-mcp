@@ -115,7 +115,7 @@ def register_layer1(
 
     @mcp.tool(
         annotations=ToolAnnotations(
-            title="Pause a campaign (preview)",
+            title="Preview pause campaign",
             readOnlyHint=False,
             destructiveHint=False,
             idempotentHint=False,
@@ -146,7 +146,7 @@ def register_layer1(
 
     @mcp.tool(
         annotations=ToolAnnotations(
-            title="Enable a campaign (preview)",
+            title="Preview enable campaign",
             readOnlyHint=False,
             destructiveHint=False,
             idempotentHint=False,
@@ -172,7 +172,7 @@ def register_layer1(
 
     @mcp.tool(
         annotations=ToolAnnotations(
-            title="Pause an ad group (preview)",
+            title="Preview pause ad group",
             readOnlyHint=False,
             destructiveHint=False,
             idempotentHint=False,
@@ -204,7 +204,7 @@ def register_layer1(
 
     @mcp.tool(
         annotations=ToolAnnotations(
-            title="Enable an ad group (preview)",
+            title="Preview enable ad group",
             readOnlyHint=False,
             destructiveHint=False,
             idempotentHint=False,
@@ -230,7 +230,7 @@ def register_layer1(
 
     @mcp.tool(
         annotations=ToolAnnotations(
-            title="Pause a keyword (preview)",
+            title="Preview pause keyword",
             readOnlyHint=False,
             destructiveHint=False,
             idempotentHint=False,
@@ -261,7 +261,7 @@ def register_layer1(
 
     @mcp.tool(
         annotations=ToolAnnotations(
-            title="Enable a keyword (preview)",
+            title="Preview enable keyword",
             readOnlyHint=False,
             destructiveHint=False,
             idempotentHint=False,
@@ -284,7 +284,7 @@ def register_layer1(
 
     @mcp.tool(
         annotations=ToolAnnotations(
-            title="Set keyword CPC bid (preview)",
+            title="Preview set keyword CPC bid",
             readOnlyHint=False,
             destructiveHint=False,
             idempotentHint=False,
@@ -308,6 +308,11 @@ def register_layer1(
     ) -> MutatePreview:
         """Preview a keyword CPC bid change. USD → micros internally.
 
+        Sets `cpc_bid_micros` — the cash CPC bid. Campaigns using
+        percent-CPC bidding strategies use a different field
+        (`percent_cpc_bid_micros`) and will reject this update; route
+        those through the Layer-2 `mutate` tool with the right field name.
+
         The new bid will be visible in the diff before commit; use that
         as the safety check rather than relying on a server-side cap.
         """
@@ -326,7 +331,7 @@ def register_layer1(
 
     @mcp.tool(
         annotations=ToolAnnotations(
-            title="Set campaign budget (preview)",
+            title="Preview set daily campaign budget",
             readOnlyHint=False,
             destructiveHint=False,
             idempotentHint=False,
@@ -354,7 +359,12 @@ def register_layer1(
             ),
         ],
     ) -> MutatePreview:
-        """Preview a daily budget change. USD is converted to micros internally."""
+        """Preview a daily budget change. USD is converted to micros internally.
+
+        Sets `amount_micros`, the daily-spend field. Custom-period
+        budgets (rare) use `total_amount_micros` instead — route those
+        through the Layer-2 `mutate` tool with the right field name.
+        """
         op = Operation(
             service="campaign_budget",
             op="update",
@@ -370,7 +380,7 @@ def register_layer1(
 
     @mcp.tool(
         annotations=ToolAnnotations(
-            title="Add a negative keyword (preview)",
+            title="Preview add negative keyword",
             readOnlyHint=False,
             destructiveHint=False,
             idempotentHint=False,
@@ -433,7 +443,7 @@ def register_layer1(
 
     @mcp.tool(
         annotations=ToolAnnotations(
-            title="Apply a Google Ads recommendation",
+            title="Apply Google Ads recommendation",
             readOnlyHint=False,
             destructiveHint=True,
             idempotentHint=False,
@@ -657,7 +667,7 @@ def register_layer1(
 
     @mcp.tool(
         annotations=ToolAnnotations(
-            title="Batch-job lifecycle dispatcher",
+            title="Manage Google Ads batch job",
             # Dispatcher: create/add/run touch state, status/results don't.
             # destructiveHint=False because the destructive moment is run, and
             # the LLM has already gone through preview/apply for each operation
@@ -824,7 +834,7 @@ def register_layer1(
 
     @mcp.tool(
         annotations=ToolAnnotations(
-            title="Offline-user-data-job lifecycle dispatcher",
+            title="Manage offline user data job",
             readOnlyHint=False,
             destructiveHint=False,
             idempotentHint=False,

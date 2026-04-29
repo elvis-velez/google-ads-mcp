@@ -52,7 +52,7 @@ def register_layer2(
 
     @mcp.tool(
         annotations=ToolAnnotations(
-            title="Run a GAQL query",
+            title="Run GAQL query",
             readOnlyHint=True,
             destructiveHint=False,
             openWorldHint=True,
@@ -102,7 +102,7 @@ def register_layer2(
 
     @mcp.tool(
         annotations=ToolAnnotations(
-            title="Call a read-only Google Ads RPC",
+            title="Call Google Ads read RPC",
             readOnlyHint=True,
             destructiveHint=False,
             openWorldHint=True,
@@ -177,7 +177,7 @@ def register_layer2(
 
     @mcp.tool(
         annotations=ToolAnnotations(
-            title="Preview a mutate (validate-only)",
+            title="Preview Google Ads write",
             # `validate_only=true` means Google Ads itself isn't mutated, but
             # the call still mints a new pending mutate_id, appends to the
             # audit log, and consumes API quota. Treat as not-read-only so
@@ -232,7 +232,7 @@ def register_layer2(
 
     @mcp.tool(
         annotations=ToolAnnotations(
-            title="Preview a mutating RPC (validate-only when supported)",
+            title="Preview Google Ads write RPC",
             readOnlyHint=False,
             destructiveHint=False,
             idempotentHint=False,
@@ -314,7 +314,7 @@ def register_layer2(
 
     @mcp.tool(
         annotations=ToolAnnotations(
-            title="Apply a previewed mutate",
+            title="Commit previewed Google Ads write",
             readOnlyHint=False,
             destructiveHint=True,
             idempotentHint=True,

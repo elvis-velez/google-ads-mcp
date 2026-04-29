@@ -87,7 +87,7 @@ def build_server(
 
     @mcp.tool(
         annotations=ToolAnnotations(
-            title="Connectivity ping",
+            title="Ping server",
             readOnlyHint=True,
             destructiveHint=False,
             openWorldHint=False,
