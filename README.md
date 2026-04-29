@@ -1,12 +1,50 @@
 # google-ads-mcp
 
-A Model Context Protocol server for the Google Ads API. Lets you manage Google Ads campaigns from inside [Claude Code](https://claude.com/claude-code), [Codex](https://github.com/openai/codex), or any MCP-compatible client — with safe, two-phase mutations and an append-only audit log.
+A Model Context Protocol server that lets an LLM **actually run your Google Ads account** — pause campaigns, change budgets, apply Google's recommendations, upload offline conversions, run bulk batch jobs — without setting CPC to $1M, hallucinating a customer ID, or burying the diff before you can review it.
 
-> Status: alpha (v0.0.1). All structural code paths are in place; full end-to-end acceptance against a real account requires Basic Access on your dev token (1–3 business days from Google).
+Built for [Claude Code](https://claude.com/claude-code), [Codex](https://github.com/openai/codex), or any MCP-compatible client.
 
-## Why a custom server
+> Status: alpha (v0.0.1). All structural code paths are in place and the unit suite is green; full end-to-end acceptance against a real account requires Basic Access on your dev token (1–3 business days from Google).
 
-Google ships an [official MCP](https://github.com/googleads/google-ads-mcp), but it's read-only by design — three tools, all reads. This one adds the writes you actually need to manage campaigns (pause, budgets, bids, negatives) with the two-phase preview-then-apply contract that makes those writes safe for an LLM to drive.
+## Why this MCP
+
+The other Google Ads MCPs you'll find on GitHub fall into two camps:
+
+1. **[Google's official one](https://github.com/googleads/google-ads-mcp)** — read-only by design. Three tools, all `Search`-style reads. Excellent if you only want to ask questions about your account; useless if you want the LLM to do anything about the answers.
+2. **Community wrappers** — usually one tool per Google Ads service. The Google Ads API has ~110 services; tool-per-service MCPs balloon ambient context, give the LLM no preview before writes, and tend to skip the parts of the API that don't fit a clean CRUD shape (recommendations, experiments, conversion uploads, async batch jobs).
+
+This server is **the writing MCP that's actually safe to give an LLM**, with full v24 API coverage in a constant ~19 tools. The whole design is built around three things competitors generally miss:
+
+- **Two-phase writes by default.** Every mutation is validated by Google first (`validate_only=true`), the per-operation diff is rendered in human-readable form, and the operation is stored under a 15-minute `mutate_id`. Nothing has happened on the account yet. The LLM (or you, in the loop) explicitly calls `apply(mutate_id)` to commit. Re-applying the same id is a no-op — re-running an apply call is safe by construction.
+- **Server-enforced customer-ID allowlist.** If the LLM hallucinates or constructs a customer ID, the server refuses the call. The allowlist comes from `ListAccessibleCustomers` plus the sub-accounts under your configured manager — real OAuth grants, not honor-system.
+- **Append-only audit log.** Every state-changing *attempt* — success, validation failure, API error, expired re-apply, idempotent replay — gets one JSONL line at `~/.local/share/google-ads-mcp/audit.log` (mode `0600`). One file, one grep, complete forensic history of what the LLM did to your account.
+
+### What that buys you, concretely
+
+- **Pause, enable, set bids, set budgets, add negatives** — typed Layer-1 outcome tools with USD→micros conversion baked in (no "the LLM put the budget in micros and lit $1M on fire" failure mode).
+- **Apply Google's own optimization recommendations** with one tool — the agentic-optimization workflow most people actually want.
+- **Generate keyword ideas** with seed types, geo targeting, language — pre-campaign research without leaving the chat.
+- **Run bulk async batch jobs** for hundreds-of-changes-at-once edits via a single lifecycle dispatcher (`batch_job(action="create" | "add_operations" | "run" | "status" | "results")`).
+- **Upload offline conversions and Customer Match user data** through the lifecycle dispatcher equivalent for `OfflineUserDataJob`.
+- **Reach the long tail** (recommendation dismiss, experiment promote/graduate/end, draft promotion, MCC sub-account creation, conversion-adjustment uploads, audience-insights generation, reach forecasts, brand suggestions, etc.) through the generic `call_read_rpc` / `call_mutate_rpc` escape hatches — no per-RPC tool needed, the LLM discovers methods via `gads-rpc-catalog://` and request fields via `gads-rpc-schema://{service}/{method}`.
+
+### Comparison at a glance
+
+| | **google-ads-mcp** (this) | [google's official MCP](https://github.com/googleads/google-ads-mcp) | typical community Google Ads MCP |
+|---|---|---|---|
+| Reads (full GAQL) | ✅ | ✅ (limited) | usually ✅ |
+| Writes | ✅ with two-phase preview / apply | ❌ read-only by design | sometimes; usually fire-and-forget |
+| Customer-ID allowlist (confused-deputy defense) | ✅ | n/a | rare |
+| Append-only audit log | ✅ JSONL, mode 0600 | ❌ | rare |
+| Idempotent re-apply (safe retries) | ✅ | n/a | ❌ |
+| v24 API coverage | **100% in 19 tools** | reads only, 3 tools | varies; usually one-tool-per-service |
+| Async-job lifecycles (BatchJob, Customer Match) | ✅ via dispatcher tools | ❌ | rarely |
+| Discovery via MCP **Resources**, not bloated tool listings | ✅ four resources | ❌ | ❌ |
+| Strict typing (pyright strict, ruff) + 100 unit tests | ✅ | varies | varies |
+| Local-only OAuth (no SaaS, no per-seat pricing) | ✅ | ✅ | varies |
+| License | MIT | Apache-2.0 | varies |
+
+The "100% of v24 in 19 tools" line is the design property: ambient tool count is bounded by *workflow categories*, not API surface size, so v25 and v26 won't grow it. See **Architecture in one paragraph** below for how.
 
 ## Architecture in one paragraph
 
