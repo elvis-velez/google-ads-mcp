@@ -19,20 +19,14 @@ An MCP server for managing Google Ads accounts. Reads via GAQL, writes via two-p
 
 ## Install
 
-Once published to PyPI:
+Install from source (PyPI publishing is on the roadmap; not available yet):
 
 ```sh
-uvx google-ads-mcp init      # interactive setup
-uvx google-ads-mcp validate  # re-validate without redoing OAuth
-```
-
-Pre-PyPI (from a checkout):
-
-```sh
-git clone <this-repo>
+git clone https://github.com/ball2jh/google-ads-mcp.git
 cd google-ads-mcp
 uv sync
-uv run google-ads-mcp init
+uv run google-ads-mcp init      # interactive setup
+uv run google-ads-mcp validate  # re-validate without redoing OAuth
 ```
 
 ## First-run setup
@@ -49,18 +43,14 @@ Credentials persist to `~/.config/google-ads-mcp/credentials.yaml` (mode `0600`)
 If validation fails after credentials are saved (e.g., your Cloud project hasn't enabled the Google Ads API yet), **don't re-run `init`** — that burns another OAuth refresh token. Fix the underlying issue, then run:
 
 ```sh
-google-ads-mcp validate
+uv run google-ads-mcp validate
 ```
 
 ## Wire it into your MCP client
 
+Point your client at the cloned checkout. Replace `/path/to/google-ads-mcp` with the absolute path to wherever you cloned this repo.
+
 ### Claude Code
-
-```sh
-claude mcp add google-ads -- uvx google-ads-mcp
-```
-
-Or while developing locally:
 
 ```sh
 claude mcp add google-ads -- uv run --directory /path/to/google-ads-mcp google-ads-mcp
@@ -72,8 +62,8 @@ In `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.google-ads]
-command = "uvx"
-args = ["google-ads-mcp"]
+command = "uv"
+args = ["run", "--directory", "/path/to/google-ads-mcp", "google-ads-mcp"]
 ```
 
 ## Tool surface
