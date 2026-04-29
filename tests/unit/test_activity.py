@@ -171,3 +171,56 @@ def test_decorator_preserves_signature_via_wraps() -> None:
 
     sig = inspect.signature(wrapped)
     assert list(sig.parameters) == ["customer_id", "campaign_id"]
+
+
+def test_decorator_renders_uri_template_in_name(tmp_path: Path) -> None:
+    """For parameterized resources (e.g. gads-schema://{resource_type}),
+    the template must be rendered against kwargs so the activity log shows
+    the concrete URI rather than the bare template."""
+    import asyncio
+
+    log_path = tmp_path / "activity.log"
+    clock = _AdvanceableClock(datetime(2026, 4, 28, tzinfo=UTC))
+    recorder = ActivityRecorder(
+        logger=JsonlActivityLogger(path=log_path, clock=clock),
+        clock=clock,
+    )
+
+    async def schema(resource_type: str) -> str:
+        return f"fields-of-{resource_type}"
+
+    wrapped = with_activity(
+        recorder, name="gads-schema://{resource_type}", kind="resource"
+    )(schema)
+
+    asyncio.run(wrapped(resource_type="campaign"))
+
+    entry = json.loads(log_path.read_text().splitlines()[0])
+    assert entry["name"] == "gads-schema://campaign"
+    assert entry["kind"] == "resource"
+
+
+def test_decorator_falls_back_when_template_kwarg_missing(tmp_path: Path) -> None:
+    """If a placeholder isn't supplied at call time, fall back to the
+    literal template instead of raising — never break a tool call to log
+    nicer text."""
+    import asyncio
+
+    log_path = tmp_path / "activity.log"
+    clock = _AdvanceableClock(datetime(2026, 4, 28, tzinfo=UTC))
+    recorder = ActivityRecorder(
+        logger=JsonlActivityLogger(path=log_path, clock=clock),
+        clock=clock,
+    )
+
+    async def handler(**_kwargs: object) -> str:
+        return "ok"
+
+    wrapped = with_activity(
+        recorder, name="gads-schema://{resource_type}", kind="resource"
+    )(handler)
+
+    asyncio.run(wrapped())  # no resource_type
+
+    entry = json.loads(log_path.read_text().splitlines()[0])
+    assert entry["name"] == "gads-schema://{resource_type}"
