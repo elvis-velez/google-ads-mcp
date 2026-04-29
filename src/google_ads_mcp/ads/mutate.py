@@ -104,8 +104,15 @@ def _build_mutate_operation(client: GoogleAdsClient, op: Operation) -> Any:
 
 
 def _extract_resource_name(mutate_op_response: Any) -> str:
-    """Pull resource_name from whichever per-service result oneof is set."""
-    which = mutate_op_response.WhichOneof("response")
+    """Pull resource_name from whichever per-service result oneof is set.
+
+    `WhichOneof` lives on the raw protobuf message, not the proto-plus
+    wrapper that `use_proto_plus=True` returns. Reach through `_pb` to get
+    at it; proto-plus surfaces this as the canonical escape hatch for
+    proto-2/3 APIs that the wrapper doesn't expose.
+    """
+    raw = getattr(mutate_op_response, "_pb", mutate_op_response)
+    which = raw.WhichOneof("response")
     if which is None:
         return ""
     sub = getattr(mutate_op_response, which, None)
