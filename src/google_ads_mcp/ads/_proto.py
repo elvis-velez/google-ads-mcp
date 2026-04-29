@@ -14,6 +14,7 @@ from __future__ import annotations
 import enum
 from typing import Any
 
+import proto
 from google.protobuf.json_format import MessageToDict
 
 
@@ -53,18 +54,50 @@ def approximate_size(row: dict[str, Any]) -> int:
 
 
 def message_to_dict(message: Any) -> dict[str, Any]:
-    """Marshal a Google Ads response proto (proto-plus) into a plain dict.
+    """Marshal a Google Ads response into a plain JSON-friendly dict.
 
-    Used by the RPC dispatcher to turn arbitrary response messages into
-    LLM-friendly JSON. proto-plus messages wrap an underlying google.protobuf
-    Message accessible via `type(msg).pb(msg)`; we pass that through
-    `MessageToDict` so enum values come back as names (`"ENABLED"` not `2`)
-    and field names use the proto convention (snake_case).
+    Four response shapes appear in the SDK and have to be handled:
+
+    1. Plain proto-plus `Message` — `recommendation_service.apply_recommendation`,
+       `payments_account_service.list_payments_accounts`, etc. Use proto-plus's
+       own `Message.to_dict` so enum→name conversion happens natively without
+       reaching for `.DESCRIPTOR` (which proto-plus's `__getattr__` rejects).
+
+    2. Pager wrappers — `keyword_plan_idea_service.generate_keyword_ideas`,
+       `batch_job_service.list_batch_job_results`, anywhere the API paginates.
+       Pagers expose `._response` holding the underlying proto-plus Message.
+
+    3. Long-running `google.api_core.operation.Operation` — returned by
+       async APIs like `batch_job_service.run_batch_job`. Its `.operation`
+       attribute is a raw `google.longrunning.Operation` protobuf with the
+       op name, done flag, and metadata. We don't poll for completion here
+       (callers query progress via GAQL on the underlying resource); we
+       just snapshot the returned operation metadata.
+
+    4. Raw `google.protobuf.Message` — rare in proto-plus-mode SDKs but
+       possible. Fall through to `MessageToDict` directly.
     """
-    pb_method = getattr(type(message), "pb", None)
-    pb: Any = pb_method(message) if callable(pb_method) else message
+    if isinstance(message, proto.Message):
+        return type(message).to_dict(message, use_integers_for_enums=False)
+
+    underlying = getattr(message, "_response", None)
+    if isinstance(underlying, proto.Message):
+        return type(underlying).to_dict(underlying, use_integers_for_enums=False)
+
+    # Long-running operation wrapper — the .operation attribute is a raw
+    # google.longrunning.Operation proto. Detect by the DESCRIPTOR presence
+    # on .operation (proto-plus messages have already been short-circuited
+    # in case 1, so we won't accidentally trip __getattr__ here).
+    inner_op = getattr(message, "operation", None)
+    if inner_op is not None and hasattr(inner_op, "DESCRIPTOR"):
+        return MessageToDict(
+            inner_op,
+            preserving_proto_field_name=True,
+            use_integers_for_enums=False,
+        )
+
     return MessageToDict(
-        pb,
+        message,
         preserving_proto_field_name=True,
         use_integers_for_enums=False,
     )
