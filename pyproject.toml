@@ -64,3 +64,7 @@ include = ["src", "tests"]
 typeCheckingMode = "strict"
 pythonVersion = "3.13"
 reportMissingTypeStubs = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
