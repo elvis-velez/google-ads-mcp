@@ -80,8 +80,10 @@ args = ["google-ads-mcp"]
 | `gaql(customer_id, query)` | 2 | Run any GAQL `SELECT`. Capped to keep responses LLM-context-friendly. |
 | `mutate(customer_id, operations)` | 2 | Generic write. Validates against the API and returns a previewable `mutate_id`. |
 | `apply(mutate_id)` | 2 | Commit a previewed mutate. Idempotent — re-applying returns the cached result. |
-| `pause_campaign(customer_id, campaign_id)` | 1 | Preview pausing a campaign. |
-| `enable_campaign(customer_id, campaign_id)` | 1 | Preview enabling a campaign. |
+| `pause_campaign` / `enable_campaign(customer_id, campaign_id)` | 1 | Preview pausing/enabling a campaign. |
+| `pause_ad_group` / `enable_ad_group(customer_id, ad_group_id)` | 1 | Granular pause/enable below the campaign level. |
+| `pause_keyword` / `enable_keyword(customer_id, criterion_resource_name)` | 1 | Pause/enable a single ad-group criterion. The most common tactical optimization. |
+| `set_keyword_bid(customer_id, criterion_resource_name, cpc_usd, force_override=false)` | 1 | Update a keyword's max CPC. USD → micros internally; subject to the CPC guardrail. |
 | `set_campaign_budget(customer_id, budget_id, daily_amount_usd)` | 1 | Preview a daily budget change. USD → micros internally. |
 | `add_negative_keyword(customer_id, scope, ref_id, text, match_type)` | 1 | Preview adding a campaign- or ad-group-level negative. |
 | `account_summary(customer_id, date_range)` | 1 | Pre-baked GAQL: per-campaign performance, sorted by spend. |

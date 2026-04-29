@@ -35,6 +35,21 @@ from google_ads_mcp.types import GaqlResult, MutatePreview, Operation
 
 _USD_TO_MICROS = 1_000_000
 
+
+def _status_op(service: str, resource_name: str, status: str) -> Operation:
+    """Build an UPDATE operation that sets a resource's status field.
+
+    Six pause/enable tools share this exact shape — a tiny helper here keeps
+    each tool ~3 lines and removes a class of typo-induced bugs (wrong
+    update_mask, mismatched status enum, etc.).
+    """
+    return Operation(
+        service=service,
+        op="update",
+        resource={"resource_name": resource_name, "status": status},
+        update_mask=["status"],
+    )
+
 DateRange = Literal[
     "TODAY",
     "YESTERDAY",
@@ -100,16 +115,14 @@ def register_layer1(
         ],
     ) -> MutatePreview:
         """Preview pausing a campaign. Returns a mutate_id; call apply() to commit."""
-        op = Operation(
-            service="campaign",
-            op="update",
-            resource={
-                "resource_name": f"customers/{customer_id}/campaigns/{campaign_id}",
-                "status": "PAUSED",
-            },
-            update_mask=["status"],
+        return await _preview(
+            customer_id,
+            _status_op(
+                "campaign",
+                f"customers/{customer_id}/campaigns/{campaign_id}",
+                "PAUSED",
+            ),
         )
-        return await _preview(customer_id, op)
 
     @mcp.tool(
         annotations=ToolAnnotations(
@@ -127,14 +140,173 @@ def register_layer1(
         campaign_id: Annotated[str, Field(description="Numeric campaign ID.")],
     ) -> MutatePreview:
         """Preview enabling (un-pausing) a campaign. Call apply() to commit."""
+        return await _preview(
+            customer_id,
+            _status_op(
+                "campaign",
+                f"customers/{customer_id}/campaigns/{campaign_id}",
+                "ENABLED",
+            ),
+        )
+
+    # ---------------- ad group status ---------------------------------------
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Pause an ad group (preview)",
+            readOnlyHint=True,
+            destructiveHint=False,
+            openWorldHint=True,
+        ),
+    )
+    @with_activity(activity, name="pause_ad_group")
+    async def pause_ad_group(  # pyright: ignore[reportUnusedFunction]
+        customer_id: Annotated[str, Field(description="10-digit customer ID.")],
+        ad_group_id: Annotated[
+            str,
+            Field(
+                description=(
+                    "Numeric ad group ID (trailing digits of ad_group.resource_name)."
+                ),
+            ),
+        ],
+    ) -> MutatePreview:
+        """Preview pausing an ad group. Use for granular tactical pauses without
+        touching the parent campaign's status."""
+        return await _preview(
+            customer_id,
+            _status_op(
+                "ad_group",
+                f"customers/{customer_id}/adGroups/{ad_group_id}",
+                "PAUSED",
+            ),
+        )
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Enable an ad group (preview)",
+            readOnlyHint=True,
+            destructiveHint=False,
+            openWorldHint=True,
+        ),
+    )
+    @with_activity(activity, name="enable_ad_group")
+    async def enable_ad_group(  # pyright: ignore[reportUnusedFunction]
+        customer_id: Annotated[str, Field(description="10-digit customer ID.")],
+        ad_group_id: Annotated[str, Field(description="Numeric ad group ID.")],
+    ) -> MutatePreview:
+        """Preview enabling (un-pausing) an ad group."""
+        return await _preview(
+            customer_id,
+            _status_op(
+                "ad_group",
+                f"customers/{customer_id}/adGroups/{ad_group_id}",
+                "ENABLED",
+            ),
+        )
+
+    # ---------------- keyword status + bid ----------------------------------
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Pause a keyword (preview)",
+            readOnlyHint=True,
+            destructiveHint=False,
+            openWorldHint=True,
+        ),
+    )
+    @with_activity(activity, name="pause_keyword")
+    async def pause_keyword(  # pyright: ignore[reportUnusedFunction]
+        customer_id: Annotated[str, Field(description="10-digit customer ID.")],
+        criterion_resource_name: Annotated[
+            str,
+            Field(
+                description=(
+                    "Full ad_group_criterion resource name, e.g. "
+                    "'customers/1234567890/adGroupCriteria/111~222'. The trailing "
+                    "id has the form '{ad_group_id}~{criterion_id}'; pass the "
+                    "whole string from your GAQL result."
+                ),
+            ),
+        ],
+    ) -> MutatePreview:
+        """Preview pausing a keyword (ad-group criterion). Most common tactical
+        optimization — kill an underperformer without touching its ad group."""
+        return await _preview(
+            customer_id,
+            _status_op("ad_group_criterion", criterion_resource_name, "PAUSED"),
+        )
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Enable a keyword (preview)",
+            readOnlyHint=True,
+            destructiveHint=False,
+            openWorldHint=True,
+        ),
+    )
+    @with_activity(activity, name="enable_keyword")
+    async def enable_keyword(  # pyright: ignore[reportUnusedFunction]
+        customer_id: Annotated[str, Field(description="10-digit customer ID.")],
+        criterion_resource_name: Annotated[
+            str,
+            Field(description="Full ad_group_criterion resource name."),
+        ],
+    ) -> MutatePreview:
+        """Preview enabling (un-pausing) a keyword."""
+        return await _preview(
+            customer_id,
+            _status_op("ad_group_criterion", criterion_resource_name, "ENABLED"),
+        )
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Set keyword CPC bid (preview)",
+            readOnlyHint=True,
+            destructiveHint=False,
+            openWorldHint=True,
+        ),
+    )
+    @with_activity(activity, name="set_keyword_bid")
+    async def set_keyword_bid(  # pyright: ignore[reportUnusedFunction]
+        customer_id: Annotated[str, Field(description="10-digit customer ID.")],
+        criterion_resource_name: Annotated[
+            str,
+            Field(description="Full ad_group_criterion resource name."),
+        ],
+        cpc_usd: Annotated[
+            float,
+            Field(
+                gt=0,
+                description=(
+                    "New max CPC bid in USD. Converted to micros internally. "
+                    "Subject to the per-account CPC guardrail; set "
+                    "force_override=true to bypass for legitimate high-CPC "
+                    "verticals (audited)."
+                ),
+            ),
+        ],
+        force_override: Annotated[
+            bool,
+            Field(
+                description=(
+                    "Bypass the CPC cap guardrail for this op. Audited. Use "
+                    "only for legal/finance/insurance verticals where bids "
+                    ">$50 are normal."
+                ),
+            ),
+        ] = False,
+    ) -> MutatePreview:
+        """Preview a keyword CPC bid change. USD → micros internally."""
         op = Operation(
-            service="campaign",
+            service="ad_group_criterion",
             op="update",
             resource={
-                "resource_name": f"customers/{customer_id}/campaigns/{campaign_id}",
-                "status": "ENABLED",
+                "resource_name": criterion_resource_name,
+                "cpc_bid_micros": round(cpc_usd * _USD_TO_MICROS),
             },
-            update_mask=["status"],
+            update_mask=["cpc_bid_micros"],
+            force_override=force_override,
         )
         return await _preview(customer_id, op)
 
