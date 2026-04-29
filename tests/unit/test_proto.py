@@ -59,6 +59,30 @@ def test_coerce_passes_primitives() -> None:
     assert coerce(True) is True
 
 
+def test_coerce_proto_plus_message() -> None:
+    """Nested proto-plus Messages get recursively serialized to dicts."""
+    nested = _Sample(name="hi", score=3)
+    assert coerce(nested) == {"name": "hi", "score": 3}
+
+
+def test_coerce_repeated_composite() -> None:
+    """proto-plus's RepeatedComposite (repeated message field) materialises
+    to a plain list — without this, GAQL responses with repeated fields
+    crash on JSON serialization."""
+
+    # Build a real RepeatedComposite via a proto-plus Message that has a
+    # repeated field. Easier than importing the internal class directly.
+    class _Container(proto.Message):  # type: ignore[misc]
+        items: list[_Sample] = proto.RepeatedField(  # type: ignore[assignment]
+            proto.MESSAGE, number=1, message=_Sample
+        )
+
+    container = _Container(items=[_Sample(name="a", score=1), _Sample(name="b", score=2)])
+    out = coerce(container.items)
+
+    assert out == [{"name": "a", "score": 1}, {"name": "b", "score": 2}]
+
+
 def test_approximate_size_grows_with_content() -> None:
     small = approximate_size({"a": 1})
     bigger = approximate_size({"campaign.name": "a really quite long campaign name"})

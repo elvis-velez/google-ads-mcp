@@ -86,7 +86,10 @@ def _build_mutate_operation(client: GoogleAdsClient, op: Operation) -> Any:
     for k, v in op.resource.items():
         try:
             setattr(target, k, v)
-        except (AttributeError, TypeError, ValueError) as e:
+        except (AttributeError, TypeError, ValueError, KeyError) as e:
+            # KeyError surfaces from proto-plus enum lookup when the value
+            # isn't a valid enum name (e.g. status="BANANA" → KeyError("BANANA")).
+            # Without explicit handling it leaks past as just "'BANANA'".
             raise ValidationFailed(
                 f"Cannot set {op.service}.{k}={v!r}: {e}"
             ) from e

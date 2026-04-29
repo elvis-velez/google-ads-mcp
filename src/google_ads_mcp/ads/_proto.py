@@ -39,12 +39,27 @@ def coerce(value: Any) -> Any:
     """Normalise SDK values for JSON-friendly downstream consumption.
 
     proto-plus enums are IntEnum-like; we report `.name` so the LLM sees
-    `"ENABLED"` not `2`. Everything else is already a Python primitive.
+    `"ENABLED"` not `2`. proto-plus repeated/map collections wrap composite
+    sub-messages and aren't JSON-serializable as-is — we materialise them
+    as plain lists/dicts and recurse. Nested proto-plus Messages get the
+    same `Message.to_dict` treatment as top-level responses.
+
+    Everything else is already a Python primitive.
     """
     if value is None:
         return None
     if isinstance(value, enum.Enum):
         return value.name
+    # proto-plus repeated collections (RepeatedComposite, RepeatedScalar) —
+    # imported lazily by class name to avoid coupling tests to the
+    # proto-plus internal layout.
+    cls_name = type(value).__name__
+    if cls_name in ("RepeatedComposite", "RepeatedScalar"):
+        return [coerce(item) for item in value]
+    if cls_name == "MapComposite":
+        return {k: coerce(v) for k, v in value.items()}
+    if isinstance(value, proto.Message):
+        return type(value).to_dict(value, use_integers_for_enums=False)
     return value
 
 
