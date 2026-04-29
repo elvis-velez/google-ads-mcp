@@ -19,9 +19,10 @@ from pydantic import Field
 
 from google_ads_mcp.ads import gaql as gaql_impl
 from google_ads_mcp.ads import mutate as mutate_impl
+from google_ads_mcp.errors import PendingExpired, PendingNotFound
+from google_ads_mcp.observability.audit import AuditEvent, AuditLogger
 from google_ads_mcp.safety import guardrails
 from google_ads_mcp.safety.allowlist import CustomerAllowlist
-from google_ads_mcp.safety.audit import AuditLogger
 from google_ads_mcp.safety.limits import LimitsConfig
 from google_ads_mcp.safety.pending import PendingStore
 from google_ads_mcp.settings import Settings
@@ -134,6 +135,7 @@ def register_layer2(
             allowlist=allowlist,
             limits=limits,
             pending=pending,
+            audit=audit,
         )
 
     @mcp.tool(
@@ -160,14 +162,38 @@ def register_layer2(
         """
 
         def applier(customer_id: str, ops: list[Operation]) -> ApplyResult:
-            resource_names = mutate_impl.mutate(
-                client, customer_id, ops, validate_only=False
-            )
-            audit.log_apply(
-                mutate_id=mutate_id,
-                customer_id=customer_id,
-                operations=ops,
-                resource_names=resource_names,
+            try:
+                resource_names = mutate_impl.mutate(
+                    client, customer_id, ops, validate_only=False
+                )
+            except Exception as e:
+                audit.record(
+                    AuditEvent(
+                        phase="apply",
+                        outcome="api_error",
+                        mutate_id=mutate_id,
+                        customer_id=customer_id,
+                        operations=ops,
+                        resource_names=None,
+                        error_type=type(e).__name__,
+                        error_message=str(e),
+                        error_request_id=getattr(e, "request_id", None),
+                    )
+                )
+                raise
+
+            audit.record(
+                AuditEvent(
+                    phase="apply",
+                    outcome="ok",
+                    mutate_id=mutate_id,
+                    customer_id=customer_id,
+                    operations=ops,
+                    resource_names=resource_names,
+                    error_type=None,
+                    error_message=None,
+                    error_request_id=None,
+                )
             )
             return ApplyResult(
                 mutate_id=mutate_id,
@@ -176,4 +202,41 @@ def register_layer2(
                 resource_names=resource_names,
             )
 
-        return await asyncio.to_thread(pending.apply, mutate_id, applier)
+        try:
+            result = await asyncio.to_thread(pending.apply, mutate_id, applier)
+        except (PendingNotFound, PendingExpired) as e:
+            outcome = "not_found" if isinstance(e, PendingNotFound) else "expired"
+            audit.record(
+                AuditEvent(
+                    phase="apply",
+                    outcome=outcome,
+                    mutate_id=mutate_id,
+                    customer_id=None,  # unknown — entry was missing
+                    operations=None,
+                    resource_names=None,
+                    error_type=type(e).__name__,
+                    error_message=str(e),
+                    error_request_id=None,
+                )
+            )
+            raise
+
+        # `applied=False` means pending.apply returned the cached result
+        # without re-running the applier — record the replay separately so
+        # auditors can distinguish a fresh commit from an idempotent re-call.
+        if not result.applied:
+            audit.record(
+                AuditEvent(
+                    phase="apply",
+                    outcome="cached_replay",
+                    mutate_id=mutate_id,
+                    customer_id=result.customer_id,
+                    operations=None,  # already audited at first commit
+                    resource_names=result.resource_names,
+                    error_type=None,
+                    error_message=None,
+                    error_request_id=None,
+                )
+            )
+
+        return result

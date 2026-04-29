@@ -19,11 +19,11 @@ from google_ads_mcp.ads import accounts as accounts_impl
 from google_ads_mcp.ads.client import build_client
 from google_ads_mcp.auth.credentials import CredentialsProvider
 from google_ads_mcp.auth.local import LocalRefreshTokenCredentials
+from google_ads_mcp.observability.audit import AuditLogger, JsonlAuditLogger
+from google_ads_mcp.observability.clock import Clock, SystemClock
 from google_ads_mcp.resources.accounts import register_accounts
 from google_ads_mcp.resources.schema import register_schema
 from google_ads_mcp.safety.allowlist import CustomerAllowlist
-from google_ads_mcp.safety.audit import AuditLogger, JsonlAuditLogger
-from google_ads_mcp.safety.clock import Clock, SystemClock
 from google_ads_mcp.safety.limits import Limits, LimitsConfig, load_limits
 from google_ads_mcp.safety.pending import PendingStore
 from google_ads_mcp.settings import Settings
@@ -104,6 +104,7 @@ def build_server(
         pending=pending,
         allowlist=allowlist,
         limits=limits,
+        audit=audit,
     )
     register_accounts(mcp, allowlist=allowlist)
     register_schema(mcp, client=client)

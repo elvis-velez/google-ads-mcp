@@ -1,7 +1,8 @@
-"""Cross-cutting safety: audit log, guardrails, diff renderer, pending store.
+"""Safety — enforcement, not recording.
 
-These modules are pure logic on internal types. They never import the SDK
-(`# pyright: basic` lives in `ads/`, not here) and have no IO except the
-audit logger's append-to-file. That's intentional — the unit-test bar is
-"runs without credentials, runs without network."
+Guardrails, diff renderer, pending store, customer-allowlist, per-account
+limits. Pure logic on internal types: no SDK imports, no I/O.
+
+The audit log lives in `observability/`, not here, because it *records*
+what enforcement decided rather than enforcing anything itself.
 """

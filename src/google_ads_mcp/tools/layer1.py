@@ -23,6 +23,7 @@ from mcp.types import ToolAnnotations
 from pydantic import Field
 
 from google_ads_mcp.ads import gaql as gaql_impl
+from google_ads_mcp.observability.audit import AuditLogger
 from google_ads_mcp.safety import guardrails
 from google_ads_mcp.safety.allowlist import CustomerAllowlist
 from google_ads_mcp.safety.limits import LimitsConfig
@@ -55,6 +56,7 @@ def register_layer1(
     pending: PendingStore,
     allowlist: CustomerAllowlist,
     limits: LimitsConfig,
+    audit: AuditLogger,
 ) -> None:
     """Register Layer 1 outcome tools."""
 
@@ -68,6 +70,7 @@ def register_layer1(
             allowlist=allowlist,
             limits=limits,
             pending=pending,
+            audit=audit,
         )
 
     # ---------------- campaign status ----------------------------------------

@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 from google_ads_mcp.errors import PendingExpired, PendingNotFound
-from google_ads_mcp.safety.clock import Clock
+from google_ads_mcp.observability.clock import Clock
 from google_ads_mcp.types import ApplyResult, CustomerId, Operation
 
 
