@@ -146,12 +146,26 @@ def with_activity(
     Usage at registration sites — the wrapped function preserves the
     original signature via `functools.wraps`, so FastMCP's signature-based
     schema generation still sees the real parameters.
+
+    If `name` contains `{...}` placeholders (e.g. URI templates for
+    parameterized resources), they're rendered against the call's kwargs
+    so the activity log shows `gads-schema://campaign` instead of the bare
+    template. Falls back to the literal `name` if a placeholder isn't
+    supplied — never breaks a tool call to log nicer text.
     """
+    is_template = "{" in name
 
     def decorator(handler: _HandlerT) -> _HandlerT:
         @functools.wraps(handler)
         async def wrapper(*args: Any, **kwargs: Any) -> Any:
-            with recorder.record_call(kind=kind, name=name, args=kwargs):
+            if is_template:
+                try:
+                    rendered = name.format(**kwargs)
+                except (KeyError, IndexError):
+                    rendered = name
+            else:
+                rendered = name
+            with recorder.record_call(kind=kind, name=rendered, args=kwargs):
                 return await handler(*args, **kwargs)
 
         return wrapper  # pyright: ignore[reportReturnType]

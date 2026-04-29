@@ -12,12 +12,10 @@ tighter `SELECT`.
 
 from __future__ import annotations
 
-import enum
-from typing import Any
-
 from google.ads.googleads.client import GoogleAdsClient
 
 from google_ads_mcp.ads._errors import translate_errors
+from google_ads_mcp.ads._proto import approximate_size, flatten
 from google_ads_mcp.types import CustomerId, GaqlResult, GaqlRow  # GaqlRow is dict[str, Any]
 
 
@@ -42,8 +40,8 @@ def search(
         for batch in stream:
             paths = list(batch.field_mask.paths)
             for proto_row in batch.results:
-                flat = _flatten(proto_row, paths)
-                row_size = _approximate_size(flat)
+                flat = flatten(proto_row, paths)
+                row_size = approximate_size(flat)
                 if bytes_used + row_size > max_bytes:
                     truncated = True
                     truncation_reason = (
@@ -69,34 +67,3 @@ def search(
         truncated=truncated,
         truncation_reason=truncation_reason,
     )
-
-
-def _flatten(proto_row: Any, paths: list[str]) -> dict[str, Any]:
-    """Walk each dotted field path into `proto_row`, building a flat dict."""
-    out: dict[str, Any] = {}
-    for path in paths:
-        value: Any = proto_row
-        for part in path.split("."):
-            value = getattr(value, part, None)
-            if value is None:
-                break
-        out[path] = _coerce(value)
-    return out
-
-
-def _coerce(value: Any) -> Any:
-    """Normalise SDK values for JSON-friendly downstream consumption.
-
-    proto-plus enums are IntEnum-like; we report `.name` so the LLM sees
-    `"ENABLED"` not `2`. Everything else is already a Python primitive.
-    """
-    if value is None:
-        return None
-    if isinstance(value, enum.Enum):
-        return value.name
-    return value
-
-
-def _approximate_size(row: dict[str, Any]) -> int:
-    """Rough byte cost of a row when rendered. Used to enforce `max_bytes`."""
-    return sum(len(k) + len(repr(v)) for k, v in row.items())

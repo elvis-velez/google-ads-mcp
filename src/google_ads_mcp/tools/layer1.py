@@ -26,13 +26,16 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
+from google_ads_mcp.ads import _proto
 from google_ads_mcp.ads import recommendations as recommendations_impl
+from google_ads_mcp.ads import rpc as rpc_impl
+from google_ads_mcp.errors import ValidationFailed
 from google_ads_mcp.observability.activity import ActivityRecorder, with_activity
 from google_ads_mcp.observability.audit import AuditEvent, AuditLogger
 from google_ads_mcp.safety.allowlist import CustomerAllowlist, check_customer_allowlist
 from google_ads_mcp.safety.pending import PendingStore
 from google_ads_mcp.tools._flow import perform_mutate
-from google_ads_mcp.types import ApplyResult, MutatePreview, Operation
+from google_ads_mcp.types import ApplyResult, MutatePreview, Operation, RpcCall
 
 _USD_TO_MICROS = 1_000_000
 
@@ -45,6 +48,27 @@ CustomerIdArg = Annotated[
         description="10-digit Google Ads customer ID, no dashes.",
     ),
 ]
+
+
+def _operation_to_dict(op: Operation) -> dict[str, Any]:
+    """Internal `Operation` → a `MutateOperation`-shaped dict.
+
+    The batch_job's `add_operations` step accepts a list of MutateOperation
+    protos. We build them as plain dicts here so the generic RPC dispatcher
+    can marshal them via `setattr` — the proto-plus client accepts nested
+    dicts as message values.
+    """
+    if op.op == "remove":
+        return {f"{op.service}_operation": {"remove": op.resource.get("resource_name", "")}}
+    if op.op == "create":
+        return {f"{op.service}_operation": {"create": op.resource}}
+    # update — needs update_mask
+    return {
+        f"{op.service}_operation": {
+            "update": op.resource,
+            "update_mask": {"paths": list(op.update_mask or [])},
+        }
+    }
 
 
 def _status_op(service: str, resource_name: str, status: str) -> Operation:
@@ -451,7 +475,13 @@ def register_layer1(
                         outcome="api_error",
                         mutate_id=None,
                         customer_id=customer_id,
+                        payload_kind="rpc_call",
                         operations=None,
+                        rpc_call=RpcCall(
+                            service="recommendation_service",
+                            method="apply_recommendation",
+                            params={"resource_name": recommendation_resource_name},
+                        ),
                         resource_names=None,
                         error_type=type(e).__name__,
                         error_message=str(e),
@@ -466,7 +496,13 @@ def register_layer1(
                     outcome="ok",
                     mutate_id=None,
                     customer_id=customer_id,
+                    payload_kind="rpc_call",
                     operations=None,
+                    rpc_call=RpcCall(
+                        service="recommendation_service",
+                        method="apply_recommendation",
+                        params={"resource_name": recommendation_resource_name},
+                    ),
                     resource_names=resource_names,
                     error_type=None,
                     error_message=None,
@@ -481,4 +517,443 @@ def register_layer1(
             )
 
         return await asyncio.to_thread(go)
+
+    # ---------------- keyword ideas (read RPC) ------------------------------
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Generate keyword ideas",
+            readOnlyHint=True,
+            destructiveHint=False,
+            openWorldHint=True,
+        ),
+    )
+    @with_activity(activity, name="generate_keyword_ideas")
+    async def generate_keyword_ideas(  # pyright: ignore[reportUnusedFunction]
+        customer_id: CustomerIdArg,
+        seed_type: Annotated[
+            Literal["keyword", "url", "site", "keyword_and_url"],
+            Field(
+                description=(
+                    "Which seed shape to use. 'keyword' takes a list of seed "
+                    "phrases; 'url' takes a single landing page; 'site' takes a "
+                    "domain name; 'keyword_and_url' combines both signals."
+                ),
+            ),
+        ],
+        keywords: Annotated[
+            list[str] | None,
+            Field(
+                description=(
+                    "Seed keyword phrases. Required when seed_type is 'keyword' "
+                    "or 'keyword_and_url'."
+                ),
+            ),
+        ] = None,
+        url: Annotated[
+            str | None,
+            Field(
+                description=(
+                    "Seed URL (a landing page). Required when seed_type is 'url' "
+                    "or 'keyword_and_url'."
+                ),
+            ),
+        ] = None,
+        site: Annotated[
+            str | None,
+            Field(
+                description=(
+                    "Seed site domain (e.g. 'example.com'). Required when "
+                    "seed_type is 'site'."
+                ),
+            ),
+        ] = None,
+        language: Annotated[
+            str | None,
+            Field(
+                description=(
+                    "Language constant resource name (e.g. 'languageConstants/1000' "
+                    "for English). Optional; omitting returns ideas for all languages."
+                ),
+            ),
+        ] = None,
+        geo_target_constants: Annotated[
+            list[str] | None,
+            Field(
+                description=(
+                    "Geo-target constant resource names (e.g. ['geoTargetConstants/2840'] "
+                    "for the US). Up to 10. Use suggest_geo_target_constants to look "
+                    "these up if you only have country names."
+                ),
+            ),
+        ] = None,
+        include_adult_keywords: Annotated[
+            bool,
+            Field(description="Include adult-content keywords in the results."),
+        ] = False,
+        page_size: Annotated[
+            int,
+            Field(
+                ge=1,
+                le=10000,
+                description=(
+                    "Page size. Caller is responsible for pagination via the "
+                    "next_page_token returned in the result if needed."
+                ),
+            ),
+        ] = 100,
+    ) -> dict[str, Any]:
+        """Generate keyword ideas for SEM campaign planning.
+
+        Returns Google's keyword-idea result list with avg monthly searches,
+        competition, and suggested bids. The standard pre-campaign research
+        workflow: feed seed keywords or URLs and get idea expansions.
+        """
+        params: dict[str, Any] = {
+            "include_adult_keywords": include_adult_keywords,
+            "page_size": page_size,
+        }
+        if language is not None:
+            params["language"] = language
+        if geo_target_constants is not None:
+            params["geo_target_constants"] = geo_target_constants
+
+        if seed_type == "keyword":
+            if not keywords:
+                raise ValidationFailed(
+                    "seed_type='keyword' requires the `keywords` argument."
+                )
+            params["keyword_seed"] = {"keywords": keywords}
+        elif seed_type == "url":
+            if not url:
+                raise ValidationFailed("seed_type='url' requires the `url` argument.")
+            params["url_seed"] = {"url": url}
+        elif seed_type == "site":
+            if not site:
+                raise ValidationFailed("seed_type='site' requires the `site` argument.")
+            params["site_seed"] = {"site": site}
+        else:  # keyword_and_url
+            if not keywords or not url:
+                raise ValidationFailed(
+                    "seed_type='keyword_and_url' requires both `keywords` and `url`."
+                )
+            params["keyword_and_url_seed"] = {"keywords": keywords, "url": url}
+
+        def go() -> dict[str, Any]:
+            check_customer_allowlist(customer_id, allowlist=allowlist)
+            response = rpc_impl.invoke(
+                client,
+                "keyword_plan_idea_service",
+                "generate_keyword_ideas",
+                params,
+                customer_id=customer_id,
+                validate_only=None,
+            )
+            return _proto.message_to_dict(response)
+
+        return await asyncio.to_thread(go)
+
+    # ---------------- async-job dispatchers ---------------------------------
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Batch-job lifecycle dispatcher",
+            # Dispatcher: create/add/run touch state, status/results don't.
+            # destructiveHint=False because the destructive moment is run, and
+            # the LLM has already gone through preview/apply for each operation
+            # (or explicitly chose to assemble outside the safety flow).
+            readOnlyHint=False,
+            destructiveHint=False,
+            idempotentHint=False,
+            openWorldHint=True,
+        ),
+    )
+    @with_activity(activity, name="batch_job")
+    async def batch_job(  # pyright: ignore[reportUnusedFunction]
+        customer_id: CustomerIdArg,
+        action: Annotated[
+            Literal["create", "add_operations", "run", "status", "results"],
+            Field(
+                description=(
+                    "Lifecycle step. 'create' returns a batch_job resource_name; "
+                    "'add_operations' appends MutateOperation entries (paged via "
+                    "sequence_token); 'run' kicks the job off async; 'status' polls "
+                    "via GAQL; 'results' fetches per-op outcomes once status=DONE."
+                ),
+            ),
+        ],
+        resource_name: Annotated[
+            str | None,
+            Field(
+                description=(
+                    "Batch-job resource_name. Required for every action except "
+                    "'create'. Format: 'customers/{customer_id}/batchJobs/{id}'."
+                ),
+            ),
+        ] = None,
+        operations: Annotated[
+            list[Operation] | None,
+            Field(
+                description=(
+                    "Operations to append. Required for action='add_operations'. "
+                    "Same shape as the Layer-2 mutate tool — service, op, "
+                    "resource, update_mask."
+                ),
+            ),
+        ] = None,
+        sequence_token: Annotated[
+            str | None,
+            Field(
+                description=(
+                    "Returned by the previous add_operations call. Pass back to "
+                    "append the next page; omit on the first add."
+                ),
+            ),
+        ] = None,
+        page_size: Annotated[
+            int,
+            Field(ge=1, le=10000, description="Page size for action='results'."),
+        ] = 1000,
+        page_token: Annotated[
+            str | None,
+            Field(description="Page token for action='results'."),
+        ] = None,
+    ) -> dict[str, Any]:
+        """Manage a Google Ads BatchJob — async-batch lifecycle.
+
+        BatchJob accepts hundreds of MutateOperation entries and runs them
+        async on Google's side; large-scale changes (bulk pause, mass label
+        updates) go through here rather than the synchronous mutate tool.
+        Each lifecycle step is a separate MCP tool call — the LLM composes
+        them.
+        """
+        check_customer_allowlist(customer_id, allowlist=allowlist)
+
+        if action == "create":
+            response = await asyncio.to_thread(
+                rpc_impl.invoke,
+                client,
+                "batch_job_service",
+                "mutate_batch_job",
+                {"operation": {"create": {}}},
+                customer_id=customer_id,
+                validate_only=None,
+            )
+            return _proto.message_to_dict(response)
+
+        if resource_name is None:
+            raise ValidationFailed(
+                f"action='{action}' requires `resource_name`. Get it from "
+                "the previous batch_job(action='create') call."
+            )
+
+        if action == "add_operations":
+            if not operations:
+                raise ValidationFailed(
+                    "action='add_operations' requires `operations` (a non-empty list)."
+                )
+            mutate_ops = [_operation_to_dict(op) for op in operations]
+            params: dict[str, Any] = {
+                "resource_name": resource_name,
+                "mutate_operations": mutate_ops,
+            }
+            if sequence_token is not None:
+                params["sequence_token"] = sequence_token
+            response = await asyncio.to_thread(
+                rpc_impl.invoke,
+                client,
+                "batch_job_service",
+                "add_batch_job_operations",
+                params,
+                customer_id=None,  # request has no customer_id field
+                validate_only=None,
+            )
+            return _proto.message_to_dict(response)
+
+        if action == "run":
+            response = await asyncio.to_thread(
+                rpc_impl.invoke,
+                client,
+                "batch_job_service",
+                "run_batch_job",
+                {"resource_name": resource_name},
+                customer_id=None,
+                validate_only=None,
+            )
+            return _proto.message_to_dict(response)
+
+        if action == "status":
+            # batch_job is GAQL-queryable; we wrap the canonical "is it done?"
+            # query so the LLM doesn't have to reconstruct it each poll.
+            from google_ads_mcp.ads import gaql as _gaql
+
+            query = (
+                "SELECT batch_job.resource_name, batch_job.status, "
+                "batch_job.metadata.creation_date_time, "
+                "batch_job.metadata.start_date_time, "
+                "batch_job.metadata.completion_date_time, "
+                "batch_job.metadata.estimated_completion_ratio, "
+                "batch_job.metadata.operation_count, "
+                "batch_job.metadata.executed_operation_count "
+                f"FROM batch_job WHERE batch_job.resource_name = '{resource_name}'"
+            )
+            result = await asyncio.to_thread(
+                _gaql.search,
+                client,
+                customer_id,
+                query,
+                max_rows=10,
+                max_bytes=1 << 16,
+            )
+            return result.model_dump()
+
+        # action == "results"
+        params = {"resource_name": resource_name, "page_size": page_size}
+        if page_token is not None:
+            params["page_token"] = page_token
+        response = await asyncio.to_thread(
+            rpc_impl.invoke,
+            client,
+            "batch_job_service",
+            "list_batch_job_results",
+            params,
+            customer_id=None,
+            validate_only=None,
+        )
+        return _proto.message_to_dict(response)
+
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Offline-user-data-job lifecycle dispatcher",
+            readOnlyHint=False,
+            destructiveHint=False,
+            idempotentHint=False,
+            openWorldHint=True,
+        ),
+    )
+    @with_activity(activity, name="offline_user_data_job")
+    async def offline_user_data_job(  # pyright: ignore[reportUnusedFunction]
+        customer_id: CustomerIdArg,
+        action: Annotated[
+            Literal["create", "add_operations", "run", "status"],
+            Field(
+                description=(
+                    "Lifecycle step. 'create' returns a job resource_name; "
+                    "'add_operations' appends user-list / store-sales operations; "
+                    "'run' kicks off processing; 'status' polls via GAQL."
+                ),
+            ),
+        ],
+        resource_name: Annotated[
+            str | None,
+            Field(
+                description=(
+                    "Job resource_name. Required for every action except 'create'. "
+                    "Format: 'customers/{customer_id}/offlineUserDataJobs/{id}'."
+                ),
+            ),
+        ] = None,
+        job: Annotated[
+            dict[str, Any] | None,
+            Field(
+                description=(
+                    "Job payload for action='create'. Required. Top-level keys: "
+                    "type ('CUSTOMER_MATCH_USER_LIST' | 'STORE_SALES_UPLOAD_*'), "
+                    "customer_match_user_list_metadata, store_sales_metadata. "
+                    "See gads-rpc-schema://offline_user_data_job_service/"
+                    "create_offline_user_data_job for the full shape."
+                ),
+            ),
+        ] = None,
+        operations: Annotated[
+            list[dict[str, Any]] | None,
+            Field(
+                description=(
+                    "OfflineUserDataJobOperation entries for action='add_operations'. "
+                    "Each is a dict with one of: create, remove, remove_all."
+                ),
+            ),
+        ] = None,
+        enable_partial_failure: Annotated[
+            bool,
+            Field(description="For action='add_operations': accept-and-report partial failures."),
+        ] = False,
+    ) -> dict[str, Any]:
+        """Manage a Google Ads OfflineUserDataJob (Customer Match / Store Sales)."""
+        check_customer_allowlist(customer_id, allowlist=allowlist)
+
+        if action == "create":
+            if job is None:
+                raise ValidationFailed(
+                    "action='create' requires `job` (the OfflineUserDataJob payload)."
+                )
+            response = await asyncio.to_thread(
+                rpc_impl.invoke,
+                client,
+                "offline_user_data_job_service",
+                "create_offline_user_data_job",
+                {"job": job},
+                customer_id=customer_id,
+                validate_only=None,
+            )
+            return _proto.message_to_dict(response)
+
+        if resource_name is None:
+            raise ValidationFailed(
+                f"action='{action}' requires `resource_name`. Get it from "
+                "the previous offline_user_data_job(action='create') call."
+            )
+
+        if action == "add_operations":
+            if not operations:
+                raise ValidationFailed(
+                    "action='add_operations' requires `operations` (non-empty list)."
+                )
+            response = await asyncio.to_thread(
+                rpc_impl.invoke,
+                client,
+                "offline_user_data_job_service",
+                "add_offline_user_data_job_operations",
+                {
+                    "resource_name": resource_name,
+                    "operations": operations,
+                    "enable_partial_failure": enable_partial_failure,
+                },
+                customer_id=None,
+                validate_only=None,
+            )
+            return _proto.message_to_dict(response)
+
+        if action == "run":
+            response = await asyncio.to_thread(
+                rpc_impl.invoke,
+                client,
+                "offline_user_data_job_service",
+                "run_offline_user_data_job",
+                {"resource_name": resource_name},
+                customer_id=None,
+                validate_only=None,
+            )
+            return _proto.message_to_dict(response)
+
+        # action == "status" — GAQL on offline_user_data_job
+        from google_ads_mcp.ads import gaql as _gaql
+
+        query = (
+            "SELECT offline_user_data_job.resource_name, "
+            "offline_user_data_job.status, "
+            "offline_user_data_job.failure_reason, "
+            "offline_user_data_job.type "
+            "FROM offline_user_data_job "
+            f"WHERE offline_user_data_job.resource_name = '{resource_name}'"
+        )
+        result = await asyncio.to_thread(
+            _gaql.search,
+            client,
+            customer_id,
+            query,
+            max_rows=10,
+            max_bytes=1 << 16,
+        )
+        return result.model_dump()
 

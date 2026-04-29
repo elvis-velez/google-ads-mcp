@@ -10,7 +10,7 @@ Google ships an [official MCP](https://github.com/googleads/google-ads-mcp), but
 
 ## Architecture in one paragraph
 
-Three layers behind a single SDK boundary. **Layer 1** has ~5 outcome-shaped tools (`pause_campaign`, `set_campaign_budget`, …) that wrap **Layer 2**'s two generic escape hatches: `gaql` for all reads, `mutate` for all writes. Below them, the `ads/` package is the only place that imports `google.ads.googleads.*`. Schema lookup and account discovery are MCP **resources** (`gads-schema://`, `gads-account://`), not tools — they don't count against the ambient context-token budget. Total registered tools stay constant regardless of how many services Google adds to the API.
+Three layers behind a single SDK boundary. **Layer 1** has ~13 outcome-shaped tools for the day-to-day workflows (`pause_campaign`, `set_campaign_budget`, `apply_recommendation`, `generate_keyword_ideas`, …) that wrap **Layer 2**'s five generic escape hatches: `gaql` for all reads, `mutate` for `MutateOperation`-shaped writes (64 services), and `call_read_rpc` / `call_mutate_rpc` for everything else (~40 services with non-conforming RPC shapes — recommendation apply/dismiss, experiment lifecycle, conversion uploads, etc.). `apply` commits both kinds of preview. Below them, the `ads/` package is the only place that imports `google.ads.googleads.*`. Schema lookup, account discovery, and RPC discovery are MCP **resources** (`gads-schema://`, `gads-account://`, `gads-rpc-catalog://`, `gads-rpc-schema://`), not tools — they don't count against the ambient context-token budget. Total registered tools stay constant regardless of how many services Google adds to the API.
 
 Full structural plan: see `plan.md`.
 
@@ -78,8 +78,10 @@ args = ["google-ads-mcp"]
 | Tool | Layer | Description |
 |---|---|---|
 | `gaql(customer_id, query)` | 2 | Run any GAQL `SELECT`. Capped to keep responses LLM-context-friendly. |
-| `mutate(customer_id, operations)` | 2 | Generic write. Validates against the API and returns a previewable `mutate_id`. |
-| `apply(mutate_id)` | 2 | Commit a previewed mutate. Idempotent — re-applying returns the cached result. |
+| `mutate(customer_id, operations)` | 2 | Generic write via `GoogleAdsService.Mutate` (64 services). Validates against the API and returns a previewable `mutate_id`. |
+| `call_read_rpc(customer_id, service, method, params)` | 2 | Generic read RPC for the long tail — keyword ideas, reach forecasts, audience insights, benchmarks, suggestions, list_invoices, etc. Refuses non-read methods. |
+| `call_mutate_rpc(customer_id, service, method, params)` | 2 | Generic mutating RPC — recommendation apply/dismiss, experiment lifecycle, MCC management, conversion uploads, etc. Returns a `mutate_id`; consult `gads-rpc-catalog://` to discover methods. |
+| `apply(mutate_id)` | 2 | Commit a previewed mutate (operations or RPC). Idempotent — re-applying returns the cached result. |
 | `pause_campaign` / `enable_campaign(customer_id, campaign_id)` | 1 | Preview pausing/enabling a campaign. |
 | `pause_ad_group` / `enable_ad_group(customer_id, ad_group_id)` | 1 | Granular pause/enable below the campaign level. |
 | `pause_keyword` / `enable_keyword(customer_id, criterion_resource_name)` | 1 | Pause/enable a single ad-group criterion. The most common tactical optimization. |
@@ -87,11 +89,16 @@ args = ["google-ads-mcp"]
 | `set_campaign_budget(customer_id, budget_id, daily_amount_usd)` | 1 | Preview a daily budget change. USD → micros internally. |
 | `add_negative_keyword(customer_id, scope, ref_id, text, match_type)` | 1 | Preview adding a campaign- or ad-group-level negative. |
 | `apply_recommendation(customer_id, recommendation_resource_name)` | 1 | Apply one Google Ads recommendation. One-shot (no validate/apply two-phase) since Google has already validated it. |
+| `generate_keyword_ideas(customer_id, seed_type, ...)` | 1 | SEM keyword research. Returns Google's keyword-idea expansions with avg searches, competition, suggested bids. |
+| `batch_job(customer_id, action, ...)` | 1 | Async batch lifecycle dispatcher: `create` → `add_operations` → `run` → `status` → `results`. For bulk changes that don't fit a synchronous mutate. |
+| `offline_user_data_job(customer_id, action, ...)` | 1 | Customer Match / Store Sales upload lifecycle: `create` → `add_operations` → `run` → `status`. |
 | `ping()` | — | Connectivity check. Returns `"pong"`. |
 
-Plus two resources:
+Plus four resources:
 - `gads-account://accessible` — customer IDs the credentials can operate on.
-- `gads-schema://{resource_type}` — selectable / filterable / sortable fields per resource.
+- `gads-schema://{resource_type}` — selectable / filterable / sortable fields per GAQL resource.
+- `gads-rpc-catalog://` — every public RPC across the v24 SDK with `read_only` / `supports_validate_only` hints, used to plan a `call_*_rpc` invocation.
+- `gads-rpc-schema://{service}/{method}` — per-method request proto fields (name, type, label, message_type, enum_values, oneof groups), used to construct `params`.
 
 ## Safety model
 
@@ -126,7 +133,9 @@ Audit and activity are write-once-per-line (POSIX append is atomic up to 4KB). T
                | "api_error" | "expired" | "not_found" | "cached_replay",
   "mutate_id": "...",
   "customer_id": "1234567890",
-  "operations": [{...}],
+  "payload_kind": "operations" | "rpc_call" | null,
+  "operations": [{...}] | null,                                       // payload_kind=operations
+  "rpc_call":   {"service":"...", "method":"...", "params":{...}} | null,  // payload_kind=rpc_call
   "result":    {"resource_names": [...]} | null,
   "error":     {"type": "...", "message": "...", "request_id": "..."} | null
 }

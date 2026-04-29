@@ -1,15 +1,20 @@
 """TTL'd, idempotent pending-mutate store.
 
-`store()` records a previewed mutate and returns a `mutate_id`. `apply()`
-runs an injected applier function exactly once per id and caches the
-result so re-applying the same id returns the cached `ApplyResult`
-without re-mutating — that's the structural guarantee for safe retries.
+`store()` records a previewed payload (Operations or RpcCall) and returns a
+`mutate_id`. `apply()` runs an injected applier function exactly once per id
+and caches the result so re-applying the same id returns the cached
+`ApplyResult` without re-mutating — that's the structural guarantee for safe
+retries.
+
+The store is payload-kind-agnostic: the applier receives the typed
+`PendingPayload` and dispatches internally. That's deliberate — the lock,
+cache, and TTL semantics are identical for `mutate(operations)` and
+`call_mutate_rpc(rpc_call)`; only the invocation differs.
 
 Lock-protected with `threading.Lock` because callers may run inside
 `asyncio.to_thread`, where multiple SDK calls share the same store via
 different threads. The applier runs under the lock for v1; this serialises
-concurrent applies but keeps reasoning simple. Layer-1 reads aren't
-gated by this lock so they stay non-blocking.
+concurrent applies but keeps reasoning simple.
 """
 
 from __future__ import annotations
@@ -22,20 +27,22 @@ from datetime import datetime, timedelta
 
 from google_ads_mcp.errors import PendingExpired, PendingNotFound
 from google_ads_mcp.observability.clock import Clock
-from google_ads_mcp.types import ApplyResult, CustomerId, Operation
+from google_ads_mcp.types import ApplyResult, CustomerId, PendingPayload
 
 
 @dataclass
 class _Entry:
     customer_id: CustomerId
-    operations: list[Operation]
+    payload: PendingPayload
     expires_at: datetime
     applied_result: ApplyResult | None = field(default=None)
 
 
-# applier(customer_id, operations) -> ApplyResult (modulo missing mutate_id);
-# the store fills in the mutate_id on its way out.
-Applier = Callable[[CustomerId, list[Operation]], ApplyResult]
+# applier(customer_id, payload) -> ApplyResult (modulo missing mutate_id);
+# the store fills in the mutate_id on its way out. The applier is the only
+# place that knows how to invoke the SDK for a given payload kind, so it
+# also owns the dispatch.
+Applier = Callable[[CustomerId, PendingPayload], ApplyResult]
 
 
 class PendingStore:
@@ -58,15 +65,15 @@ class PendingStore:
         self,
         *,
         customer_id: CustomerId,
-        operations: list[Operation],
+        payload: PendingPayload,
     ) -> tuple[str, datetime]:
-        """Persist a previewed mutate; return (mutate_id, expires_at)."""
+        """Persist a previewed payload; return (mutate_id, expires_at)."""
         with self._lock:
             mutate_id = self._id_factory()
             expires_at = self._clock.now() + self._ttl
             self._entries[mutate_id] = _Entry(
                 customer_id=customer_id,
-                operations=list(operations),
+                payload=payload,
                 expires_at=expires_at,
             )
             return mutate_id, expires_at
@@ -98,7 +105,7 @@ class PendingStore:
                 # the original commit.
                 return entry.applied_result.model_copy(update={"applied": False})
 
-            result = applier(entry.customer_id, entry.operations)
+            result = applier(entry.customer_id, entry.payload)
             entry.applied_result = result
             return result
 

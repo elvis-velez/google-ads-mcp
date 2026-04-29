@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from google_ads_mcp.types import Operation, OperationDiff
+from google_ads_mcp.types import Operation, OperationDiff, RpcCall, RpcCallDiff
 
 
 def render(op: Operation) -> OperationDiff:
@@ -68,3 +68,25 @@ def _render_value(value: Any) -> str:
     if isinstance(value, str):
         return value
     return repr(value)
+
+
+def render_rpc_call(rpc: RpcCall) -> RpcCallDiff:
+    """Build a human-readable preview of an `RpcCall`.
+
+    Shape parallels `render(Operation)`: a one-line summary plus a multi-line
+    detail showing the params being sent. The diff is client-side only — the
+    actual API round-trip happens in the perform_mutate_rpc flow when the
+    request type supports validate_only.
+    """
+    lines = [f"Will call {rpc.service}.{rpc.method} with:"]
+    if not rpc.params:
+        lines.append("  (no params)")
+    else:
+        for k, v in sorted(rpc.params.items()):
+            lines.append(f"  {k}: {_render_value(v)}")
+    return RpcCallDiff(
+        service=rpc.service,
+        method=rpc.method,
+        summary=f"rpc {rpc.service}.{rpc.method}",
+        detail="\n".join(lines),
+    )

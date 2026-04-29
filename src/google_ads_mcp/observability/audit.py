@@ -15,15 +15,18 @@ Schema (one JSON object per line):
                    | "api_error" | "expired" | "not_found" | "cached_replay",
       "mutate_id": "..." | null,
       "customer_id": "1234567890" | null,
-      "operations": [{...}, ...] | null,
-      "result":    {"resource_names": [...]} | null,
-      "error":     {"type": "...", "message": "...", "request_id": "..." | null} | null
+      "payload_kind": "operations" | "rpc_call" | null,
+      "operations": [{...}, ...] | null,                            # payload_kind=operations
+      "rpc_call":   {"service":..., "method":..., "params":...} | null,   # payload_kind=rpc_call
+      "result":     {"resource_names": [...]} | null,
+      "error":      {"type": "...", "message": "...", "request_id": "..." | null} | null
     }
 
+`payload_kind` discriminates which of `operations`/`rpc_call` is populated.
 Failure-path entries always include enough context to act on:
 - `mutate_id` if known (apply-time failures always; preview-time guardrail
   failures don't have one yet).
-- `operations` whenever they were resolvable.
+- The relevant payload (operations or rpc_call) whenever it was resolvable.
 - `error.type` is the Python class name; `error.message` is human-readable.
 
 POSIX append writes are atomic up to PIPE_BUF (4096 bytes), well above any
@@ -40,7 +43,7 @@ from pathlib import Path
 from typing import Any, Literal, Protocol
 
 from google_ads_mcp.observability.clock import Clock
-from google_ads_mcp.types import Operation
+from google_ads_mcp.types import Operation, RpcCall
 
 Phase = Literal["preview", "apply"]
 Outcome = Literal[
@@ -52,17 +55,25 @@ Outcome = Literal[
     "not_found",
     "cached_replay",
 ]
+PayloadKind = Literal["operations", "rpc_call"]
 
 
 @dataclass(frozen=True, slots=True)
 class AuditEvent:
-    """One line of the audit log, before serialization."""
+    """One line of the audit log, before serialization.
+
+    `payload_kind` discriminates which of `operations` / `rpc_call` is
+    populated. Both may be None (e.g. apply-time not_found, where the entry
+    was missing so we never knew the kind).
+    """
 
     phase: Phase
     outcome: Outcome
     mutate_id: str | None
     customer_id: str | None
+    payload_kind: PayloadKind | None
     operations: list[Operation] | None
+    rpc_call: RpcCall | None
     resource_names: list[str] | None
     error_type: str | None
     error_message: str | None
@@ -89,10 +100,14 @@ class JsonlAuditLogger:
             "outcome": event.outcome,
             "mutate_id": event.mutate_id,
             "customer_id": event.customer_id,
+            "payload_kind": event.payload_kind,
             "operations": (
                 [op.model_dump() for op in event.operations]
                 if event.operations is not None
                 else None
+            ),
+            "rpc_call": (
+                event.rpc_call.model_dump() if event.rpc_call is not None else None
             ),
             "result": (
                 {"resource_names": event.resource_names}

@@ -28,6 +28,8 @@ from google_ads_mcp.observability.activity import (
 from google_ads_mcp.observability.audit import AuditLogger, JsonlAuditLogger
 from google_ads_mcp.observability.clock import Clock, SystemClock
 from google_ads_mcp.resources.accounts import register_accounts
+from google_ads_mcp.resources.rpc_catalog import register_rpc_catalog
+from google_ads_mcp.resources.rpc_schema import register_rpc_schema
 from google_ads_mcp.resources.schema import register_schema
 from google_ads_mcp.safety.allowlist import CustomerAllowlist
 from google_ads_mcp.safety.pending import PendingStore
@@ -111,6 +113,8 @@ def build_server(
     )
     register_accounts(mcp, allowlist=allowlist, activity=activity_recorder)
     register_schema(mcp, client=client, activity=activity_recorder)
+    register_rpc_catalog(mcp, client=client, activity=activity_recorder)
+    register_rpc_schema(mcp, client=client, activity=activity_recorder)
 
     _log.info(
         "server constructed (audit=%s activity=%s)",

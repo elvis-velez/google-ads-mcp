@@ -28,10 +28,12 @@ def register_accounts(
     @mcp.resource(
         "gads-account://accessible",
         name="accessible-accounts",
+        title="Accessible Google Ads Accounts",
         description=(
             "Google Ads customer IDs the current credentials can operate on. "
             "10-digit numeric strings, no dashes."
         ),
+        mime_type="application/json",
     )
     @with_activity(activity, name="gads-account://accessible", kind="resource")
     async def accessible() -> AccessibleAccounts:  # pyright: ignore[reportUnusedFunction]
