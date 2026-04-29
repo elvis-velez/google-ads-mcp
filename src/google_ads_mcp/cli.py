@@ -38,6 +38,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     init.set_defaults(func=_cmd_init)
 
+    validate = subparsers.add_parser(
+        "validate",
+        help="Re-run validation against the saved credentials (no OAuth redo).",
+    )
+    validate.set_defaults(func=_cmd_validate)
+
     return parser
 
 
@@ -52,6 +58,12 @@ def _cmd_init(_args: argparse.Namespace) -> int:
     from google_ads_mcp.auth.init_cmd import run_init
 
     return run_init()
+
+
+def _cmd_validate(_args: argparse.Namespace) -> int:
+    from google_ads_mcp.auth.init_cmd import run_validate
+
+    return run_validate()
 
 
 def main(argv: Sequence[str] | None = None) -> int:

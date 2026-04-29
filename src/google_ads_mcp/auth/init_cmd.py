@@ -22,8 +22,9 @@ import yaml
 from google_ads_mcp.ads import accounts as accounts_impl
 from google_ads_mcp.ads.client import build_client
 from google_ads_mcp.auth.credentials import Credentials
+from google_ads_mcp.auth.local import LocalRefreshTokenCredentials
 from google_ads_mcp.auth.oauth import run_loopback_flow
-from google_ads_mcp.errors import AdsMcpError
+from google_ads_mcp.errors import AdsMcpError, ConfigError
 from google_ads_mcp.settings import Settings
 
 _BANNER = """\
@@ -184,8 +185,13 @@ def run_init(settings: Settings | None = None) -> int:
     try:
         ids = validate_credentials(creds)
     except AdsMcpError as e:
-        print(f"\nCredentials saved but validation failed: {e}")
-        print("Re-run `google-ads-mcp init` after fixing the underlying issue.")
+        print(f"\nValidation failed: {e}")
+        print()
+        print(
+            "Your credentials are saved — you do NOT need to redo the OAuth flow. "
+            "After fixing the underlying issue, re-run validation with:"
+        )
+        print("  google-ads-mcp validate")
         return 1
 
     if ids:
@@ -195,5 +201,38 @@ def run_init(settings: Settings | None = None) -> int:
             "\nSetup complete, but no accessible customer accounts were returned. "
             "If you expected accounts, check that the Google account you signed in "
             "as has access to your Google Ads accounts."
+        )
+    return 0
+
+
+def run_validate(settings: Settings | None = None) -> int:
+    """Validate the existing credentials without redoing OAuth.
+
+    Useful when init's post-write validation fails (e.g., Cloud API not
+    enabled, dev token still pending) — fix the underlying issue and run
+    this without re-prompting for secrets or burning another refresh token.
+    """
+    settings = settings or Settings()
+
+    print(f"Loading credentials from {settings.credentials_path}...")
+    try:
+        creds = LocalRefreshTokenCredentials(settings.credentials_path).get()
+    except ConfigError as e:
+        print(f"\n{e}")
+        return 1
+
+    print("Validating with ListAccessibleCustomers...")
+    try:
+        ids = validate_credentials(creds)
+    except AdsMcpError as e:
+        print(f"\nValidation failed: {e}")
+        return 1
+
+    if ids:
+        print(f"\nValidation passed. Accessible customer IDs: {', '.join(ids)}")
+    else:
+        print(
+            "\nValidation passed, but no accessible customer accounts were returned. "
+            "Check that the signed-in Google account has access to your Google Ads accounts."
         )
     return 0
