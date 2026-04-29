@@ -54,7 +54,11 @@ def coerce(value: Any) -> Any:
     # imported lazily by class name to avoid coupling tests to the
     # proto-plus internal layout.
     cls_name = type(value).__name__
-    if cls_name in ("RepeatedComposite", "RepeatedScalar"):
+    # `Repeated` is the proto-plus base class for repeated proto fields;
+    # `RepeatedComposite` and `RepeatedScalar` are its subclasses but
+    # in practice the marshalled instance reports as the base in some
+    # SDK code paths. Catch all three names.
+    if cls_name in ("Repeated", "RepeatedComposite", "RepeatedScalar"):
         return [coerce(item) for item in value]
     if cls_name == "MapComposite":
         return {k: coerce(v) for k, v in value.items()}
