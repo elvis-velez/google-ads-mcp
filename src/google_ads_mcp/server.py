@@ -104,7 +104,6 @@ def build_server(
     register_layer1(
         mcp,
         client=client,
-        settings=settings,
         pending=pending,
         allowlist=allowlist,
         audit=audit,

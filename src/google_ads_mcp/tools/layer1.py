@@ -1,16 +1,20 @@
 """Layer 1 — outcome-shaped tools.
 
-Workflow wrappers around Layer-2 mutate. Each tool constructs a single
-`Operation` with the right service / op / resource and runs the shared
-`perform_mutate` flow — guardrails, validate-only, diff, pending. The LLM
-then calls `apply(mutate_id)` to commit. No auto-apply path in v1; every
-write requires an explicit apply step (per the safety model).
+Workflow wrappers around Layer-2 mutate. Each tool binds a common LLM
+intent ("pause this keyword", "set this bid") to an `Operation` with the
+right service/op/resource shape, then runs the shared `perform_mutate`
+flow — allowlist check, validate-only, diff, pending. The LLM then calls
+`apply(mutate_id)` to commit.
 
-`account_summary` is the read-side outcome: a pre-baked GAQL query for the
-common "show me how each campaign is doing" question.
+Layer-1 tools exist for the operations that benefit from a tight typed
+schema (USD-to-micros conversion, Literal enums, baked-in resource_name
+paths). The long tail of Google Ads operations goes through the generic
+Layer-2 `mutate` escape hatch.
 
-Adding a new Layer-1 tool is a single function — the safety machinery and
-SDK translation already handle every standard service.
+The one exception is `apply_recommendation`, which uses a different SDK
+endpoint (RecommendationService, not the GoogleAdsService.Mutate oneof)
+and therefore cannot route through `perform_mutate`. It's the only Layer-1
+tool that's a one-shot rather than two-phase.
 """
 
 from __future__ import annotations
@@ -22,17 +26,25 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
-from google_ads_mcp.ads import gaql as gaql_impl
 from google_ads_mcp.ads import recommendations as recommendations_impl
 from google_ads_mcp.observability.activity import ActivityRecorder, with_activity
 from google_ads_mcp.observability.audit import AuditEvent, AuditLogger
 from google_ads_mcp.safety.allowlist import CustomerAllowlist, check_customer_allowlist
 from google_ads_mcp.safety.pending import PendingStore
-from google_ads_mcp.settings import Settings
 from google_ads_mcp.tools._flow import perform_mutate
-from google_ads_mcp.types import ApplyResult, GaqlResult, MutatePreview, Operation
+from google_ads_mcp.types import ApplyResult, MutatePreview, Operation
 
 _USD_TO_MICROS = 1_000_000
+
+# Surfaced in every tool's input schema; rejects malformed IDs (dashes,
+# wrong length) before they hit the allowlist or SDK.
+CustomerIdArg = Annotated[
+    str,
+    Field(
+        pattern=r"^\d{10}$",
+        description="10-digit Google Ads customer ID, no dashes.",
+    ),
+]
 
 
 def _status_op(service: str, resource_name: str, status: str) -> Operation:
@@ -49,16 +61,6 @@ def _status_op(service: str, resource_name: str, status: str) -> Operation:
         update_mask=["status"],
     )
 
-DateRange = Literal[
-    "TODAY",
-    "YESTERDAY",
-    "LAST_7_DAYS",
-    "LAST_14_DAYS",
-    "LAST_30_DAYS",
-    "THIS_MONTH",
-    "LAST_MONTH",
-    "ALL_TIME",
-]
 NegativeScope = Literal["campaign", "ad_group"]
 MatchType = Literal["BROAD", "PHRASE", "EXACT"]
 
@@ -67,7 +69,6 @@ def register_layer1(
     mcp: FastMCP,
     *,
     client: Any,
-    settings: Settings,
     pending: PendingStore,
     allowlist: CustomerAllowlist,
     audit: AuditLogger,
@@ -99,9 +100,7 @@ def register_layer1(
     )
     @with_activity(activity, name="pause_campaign")
     async def pause_campaign(  # pyright: ignore[reportUnusedFunction]
-        customer_id: Annotated[
-            str, Field(description="10-digit Google Ads customer ID, no dashes.")
-        ],
+        customer_id: CustomerIdArg,
         campaign_id: Annotated[
             str,
             Field(
@@ -132,9 +131,7 @@ def register_layer1(
     )
     @with_activity(activity, name="enable_campaign")
     async def enable_campaign(  # pyright: ignore[reportUnusedFunction]
-        customer_id: Annotated[
-            str, Field(description="10-digit Google Ads customer ID, no dashes.")
-        ],
+        customer_id: CustomerIdArg,
         campaign_id: Annotated[str, Field(description="Numeric campaign ID.")],
     ) -> MutatePreview:
         """Preview enabling (un-pausing) a campaign. Call apply() to commit."""
@@ -160,7 +157,7 @@ def register_layer1(
     )
     @with_activity(activity, name="pause_ad_group")
     async def pause_ad_group(  # pyright: ignore[reportUnusedFunction]
-        customer_id: Annotated[str, Field(description="10-digit customer ID.")],
+        customer_id: CustomerIdArg,
         ad_group_id: Annotated[
             str,
             Field(
@@ -192,7 +189,7 @@ def register_layer1(
     )
     @with_activity(activity, name="enable_ad_group")
     async def enable_ad_group(  # pyright: ignore[reportUnusedFunction]
-        customer_id: Annotated[str, Field(description="10-digit customer ID.")],
+        customer_id: CustomerIdArg,
         ad_group_id: Annotated[str, Field(description="Numeric ad group ID.")],
     ) -> MutatePreview:
         """Preview enabling (un-pausing) an ad group."""
@@ -218,7 +215,7 @@ def register_layer1(
     )
     @with_activity(activity, name="pause_keyword")
     async def pause_keyword(  # pyright: ignore[reportUnusedFunction]
-        customer_id: Annotated[str, Field(description="10-digit customer ID.")],
+        customer_id: CustomerIdArg,
         criterion_resource_name: Annotated[
             str,
             Field(
@@ -249,7 +246,7 @@ def register_layer1(
     )
     @with_activity(activity, name="enable_keyword")
     async def enable_keyword(  # pyright: ignore[reportUnusedFunction]
-        customer_id: Annotated[str, Field(description="10-digit customer ID.")],
+        customer_id: CustomerIdArg,
         criterion_resource_name: Annotated[
             str,
             Field(description="Full ad_group_criterion resource name."),
@@ -272,7 +269,7 @@ def register_layer1(
     )
     @with_activity(activity, name="set_keyword_bid")
     async def set_keyword_bid(  # pyright: ignore[reportUnusedFunction]
-        customer_id: Annotated[str, Field(description="10-digit customer ID.")],
+        customer_id: CustomerIdArg,
         criterion_resource_name: Annotated[
             str,
             Field(description="Full ad_group_criterion resource name."),
@@ -314,7 +311,7 @@ def register_layer1(
     )
     @with_activity(activity, name="set_campaign_budget")
     async def set_campaign_budget(  # pyright: ignore[reportUnusedFunction]
-        customer_id: Annotated[str, Field(description="10-digit customer ID.")],
+        customer_id: CustomerIdArg,
         budget_id: Annotated[
             str,
             Field(
@@ -358,7 +355,7 @@ def register_layer1(
     )
     @with_activity(activity, name="add_negative_keyword")
     async def add_negative_keyword(  # pyright: ignore[reportUnusedFunction]
-        customer_id: Annotated[str, Field(description="10-digit customer ID.")],
+        customer_id: CustomerIdArg,
         scope: Annotated[
             NegativeScope,
             Field(
@@ -421,7 +418,7 @@ def register_layer1(
     )
     @with_activity(activity, name="apply_recommendation")
     async def apply_recommendation(  # pyright: ignore[reportUnusedFunction]
-        customer_id: Annotated[str, Field(description="10-digit customer ID.")],
+        customer_id: CustomerIdArg,
         recommendation_resource_name: Annotated[
             str,
             Field(
@@ -485,51 +482,3 @@ def register_layer1(
 
         return await asyncio.to_thread(go)
 
-    # ---------------- account summary (read) --------------------------------
-
-    @mcp.tool(
-        annotations=ToolAnnotations(
-            title="Account performance summary",
-            readOnlyHint=True,
-            destructiveHint=False,
-            openWorldHint=True,
-        ),
-    )
-    @with_activity(activity, name="account_summary")
-    async def account_summary(  # pyright: ignore[reportUnusedFunction]
-        customer_id: Annotated[str, Field(description="10-digit customer ID.")],
-        date_range: Annotated[
-            DateRange,
-            Field(
-                description=(
-                    "GAQL date-range literal. LAST_7_DAYS is the canonical 'how are "
-                    "we doing' window."
-                ),
-            ),
-        ] = "LAST_7_DAYS",
-    ) -> GaqlResult:
-        """Per-campaign performance for the date range, sorted by spend descending.
-
-        Pre-baked GAQL: campaign id/name/status plus impressions, clicks, cost,
-        conversions, and cost-per-conversion. Use the gaql tool directly for
-        anything more complex.
-        """
-        query = (
-            "SELECT campaign.id, campaign.name, campaign.status, "
-            "metrics.impressions, metrics.clicks, metrics.cost_micros, "
-            "metrics.conversions, metrics.cost_per_conversion "
-            f"FROM campaign WHERE segments.date DURING {date_range} "
-            "ORDER BY metrics.cost_micros DESC"
-        )
-
-        def go() -> GaqlResult:
-            check_customer_allowlist(customer_id, allowlist=allowlist)
-            return gaql_impl.search(
-                client,
-                customer_id,
-                query,
-                max_rows=settings.gaql_max_rows,
-                max_bytes=settings.gaql_max_response_bytes,
-            )
-
-        return await asyncio.to_thread(go)
