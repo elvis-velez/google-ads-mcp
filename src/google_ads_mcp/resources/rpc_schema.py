@@ -41,7 +41,7 @@ def register_rpc_schema(
         ),
         mime_type="application/json",
     )
-    @with_activity(activity, name="gads-rpc-schema://", kind="resource")
+    @with_activity(activity, name="gads-rpc-schema://{service}/{method}", kind="resource")
     async def schema(service: str, method: str) -> dict[str, Any]:  # pyright: ignore[reportUnusedFunction]
         key = (service, method)
         async with lock:
