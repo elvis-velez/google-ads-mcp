@@ -49,6 +49,7 @@ _COMPLETIONS: tuple[str, ...] = (
     "keyword_view",
     "search_term_view",
     "shopping_performance_view",
+    "shopping_product",
 )
 
 
